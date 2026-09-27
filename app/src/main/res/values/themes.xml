@@ -1,0 +1,4 @@
+<resources>
+    <!-- Only covers the window before Compose draws. The real theme lives in ui/theme. -->
+    <style name="Theme.Folio" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
