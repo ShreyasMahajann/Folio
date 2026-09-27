@@ -4,3 +4,9 @@
 build/
 local.properties
 *.iml
+
+# Release signing key and its passwords. Never commit these.
+/keystore/
+*.jks
+*.keystore
+folio-release-secrets.txt
