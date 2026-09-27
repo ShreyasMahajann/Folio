@@ -15,14 +15,32 @@ android {
         applicationId = "com.shreyas.pdfreader"
         minSdk = 31
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        // The release workflow passes both: -PversionCode=<run number> -PversionName=<tag>
+        versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
+        versionName = findProperty("versionName") as String? ?: "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Release key comes from the environment, so it never enters the repository.
+    // Without it a release build is unsigned.
+    val keystorePath = System.getenv("FOLIO_KEYSTORE_FILE")
+    signingConfigs {
+        if (keystorePath != null) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("FOLIO_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("FOLIO_KEY_ALIAS")
+                keyPassword = System.getenv("FOLIO_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

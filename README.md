@@ -50,6 +50,31 @@ adb install -r app\build\outputs\apk\debug\app-debug.apk
 You can also copy `app-debug.apk` to the phone and open it there. Android asks for permission to install
 from that source.
 
+## Releases
+
+`.github/workflows/ci.yml` runs unit tests, lint and a debug build on every push and pull request.
+A tag that starts with `v` also builds the signed, minified APK and attaches it to a GitHub release.
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+The workflow needs four repository secrets
+(**Settings > Secrets and variables > Actions > New repository secret**):
+
+| Secret | Value |
+|---|---|
+| `FOLIO_KEYSTORE_BASE64` | The release keystore, base64 encoded |
+| `FOLIO_KEYSTORE_PASSWORD` | Keystore password |
+| `FOLIO_KEY_ALIAS` | Key alias |
+| `FOLIO_KEY_PASSWORD` | Key password |
+
+Keep the keystore safe. Android installs an update only when it is signed with the same key.
+
+To build a signed release on your own PC, set `FOLIO_KEYSTORE_FILE`, `FOLIO_KEYSTORE_PASSWORD`,
+`FOLIO_KEY_ALIAS` and `FOLIO_KEY_PASSWORD`, then run `gradlew assembleRelease`.
+
 ## Architecture
 
 Single activity, Jetpack Compose, MVVM. ViewModels expose `StateFlow`. No dependency injection framework:
@@ -114,9 +139,10 @@ app/src/main/java/com/shreyas/pdfreader/
 3. Tile rendering for sharp zoom at any level.
 4. Thumbnail strip in the scrubber.
 5. Password prompt for protected PDFs.
-6. Release build with R8. The debug APK is about 32 MB, a release build is far smaller.
 
 ## Test status
 
 - Unit tests: progress and zoom maths.
 - Instrumented tests: database queries. They need a phone or emulator.
+
+APK size: about 3 MB for the release build, about 32 MB for the debug build.
