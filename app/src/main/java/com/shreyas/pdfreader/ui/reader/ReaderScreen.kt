@@ -108,6 +108,7 @@ private fun ReaderContent(
                 bookmarked = bookmarks.any { it.page == state.currentPage },
                 onBack = onBack,
                 onToggleBookmark = viewModel::toggleBookmark,
+                onSwitchTheme = { viewModel.updateSettings(settings.copy(theme = settings.theme.next())) },
                 onShowBookmarks = { showBookmarks = true },
                 onShowSettings = { showSettings = true },
             )

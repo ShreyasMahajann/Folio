@@ -2,6 +2,7 @@ package com.shreyas.pdfreader
 
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import com.shreyas.pdfreader.data.PdfDownloader
 import com.shreyas.pdfreader.ui.reader.MAX_ZOOM
 import com.shreyas.pdfreader.ui.reader.Zoom
 import com.shreyas.pdfreader.ui.reader.listScrollForZoom
@@ -26,6 +27,15 @@ class ReaderMathTest {
         assertEquals(100, progressPercent(page = 99, pageCount = 100))
         assertEquals(100, progressPercent(page = 500, pageCount = 100))
         assertEquals(100, progressPercent(page = 0, pageCount = 1))
+    }
+
+    @Test
+    fun downloadedFileNamesAreSafe() {
+        assertEquals("book.pdf", PdfDownloader.safeFileName("book.pdf"))
+        assertEquals("BOOK.PDF", PdfDownloader.safeFileName("BOOK.PDF"))
+        assertEquals("download.bin.pdf", PdfDownloader.safeFileName("download.bin"))
+        assertEquals("_.._etc_passwd.pdf", PdfDownloader.safeFileName("/../etc/passwd"))
+        assertEquals("Document.pdf", PdfDownloader.safeFileName(" .. "))
     }
 
     @Test

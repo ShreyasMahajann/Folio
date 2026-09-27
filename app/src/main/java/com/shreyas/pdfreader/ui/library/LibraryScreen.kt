@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -46,6 +47,7 @@ import com.shreyas.pdfreader.data.db.DocumentEntity
 @Composable
 fun LibraryScreen(
     onOpen: (documentId: Long) -> Unit,
+    onSearch: () -> Unit,
     viewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.Factory),
 ) {
     val items by viewModel.items.collectAsStateWithLifecycle()
@@ -66,6 +68,9 @@ fun LibraryScreen(
             TopAppBar(
                 title = { Text("Library", fontFamily = FontFamily.Serif) },
                 actions = {
+                    IconButton(onClick = onSearch) {
+                        Icon(Icons.Filled.Search, contentDescription = "Find a PDF on the web")
+                    }
                     IconButton(onClick = pickPdf, enabled = !importing) {
                         Icon(Icons.Filled.Add, contentDescription = "Import PDF")
                     }

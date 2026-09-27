@@ -1,6 +1,7 @@
 package com.shreyas.pdfreader.data
 
 import android.content.Context
+import android.content.res.Configuration
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -12,7 +13,12 @@ import kotlinx.coroutines.flow.map
 
 enum class ReadingMode { PAGED, SCROLL }
 enum class FitMode { WIDTH, PAGE }
-enum class PageTheme { LIGHT, DARK, SEPIA }
+enum class PageTheme {
+    LIGHT, SEPIA, DARK;
+
+    /** Order of the quick switch in the reader top bar. */
+    fun next(): PageTheme = entries[(ordinal + 1) % entries.size]
+}
 
 data class ReaderSettings(
     val mode: ReadingMode = ReadingMode.PAGED,
@@ -32,7 +38,7 @@ class SettingsStore(private val context: Context) {
         ReaderSettings(
             mode = prefs.enum(MODE, ReadingMode.PAGED),
             fit = prefs.enum(FIT, FitMode.PAGE),
-            theme = prefs.enum(THEME, PageTheme.LIGHT),
+            theme = prefs.enum(THEME, systemTheme()),
             keepAwake = prefs[KEEP_AWAKE] ?: true,
             lockOrientation = prefs[LOCK_ORIENTATION] ?: false,
             brightness = prefs[BRIGHTNESS],
@@ -48,6 +54,12 @@ class SettingsStore(private val context: Context) {
             prefs[LOCK_ORIENTATION] = settings.lockOrientation
             if (settings.brightness == null) prefs.remove(BRIGHTNESS) else prefs[BRIGHTNESS] = settings.brightness
         }
+    }
+
+    /** The theme until the reader picks one: dark when the phone is in dark mode. */
+    private fun systemTheme(): PageTheme {
+        val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        return if (night == Configuration.UI_MODE_NIGHT_YES) PageTheme.DARK else PageTheme.LIGHT
     }
 
     private inline fun <reified T : Enum<T>> Preferences.enum(key: Preferences.Key<String>, default: T): T =

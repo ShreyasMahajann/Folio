@@ -21,6 +21,10 @@ private val AccentOnDark = Color(0xFFE0B98A)
 private val LightColors = lightColorScheme(
     primary = Accent,
     onPrimary = Color.White,
+    secondary = Accent,
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFEBDDCB),
+    onSecondaryContainer = Ink,
     background = Paper,
     onBackground = Ink,
     surface = Paper,
@@ -33,6 +37,10 @@ private val LightColors = lightColorScheme(
 private val DarkColors = darkColorScheme(
     primary = AccentOnDark,
     onPrimary = Ink,
+    secondary = AccentOnDark,
+    onSecondary = Ink,
+    secondaryContainer = Color(0xFF4A3B2A),
+    onSecondaryContainer = Color(0xFFE8E2D9),
     background = Color.Black,
     onBackground = Color(0xFFE8E2D9),
     surface = Color(0xFF121212),
@@ -48,6 +56,7 @@ private val SepiaColors = LightColors.copy(
     surfaceContainer = SepiaDeep,
     surfaceContainerHigh = SepiaDeep,
     surfaceContainerLow = Sepia,
+    secondaryContainer = Color(0xFFD6C6A5),
 )
 
 /** Library and dialogs. Follows the system setting. */
@@ -71,7 +80,11 @@ fun ReaderTheme(theme: PageTheme, content: @Composable () -> Unit) {
  * Page themes are filters over the rendered bitmap. A PDF holds fixed colours, so true recolouring
  * is not possible with this renderer. Dark mode inverts photos and diagrams together with the text.
  */
-class PagePalette(val background: Color, val filter: ColorFilter?)
+class PagePalette(
+    /** Colour of an empty page under [filter]. Also fills the space around the page. */
+    val background: Color,
+    val filter: ColorFilter?,
+)
 
 private val InvertColors = ColorMatrix(
     floatArrayOf(
@@ -84,7 +97,7 @@ private val InvertColors = ColorMatrix(
 
 val PageTheme.palette: PagePalette
     get() = when (this) {
-        PageTheme.LIGHT -> PagePalette(Color(0xFFECEAE6), null)
+        PageTheme.LIGHT -> PagePalette(Paper, null)
         PageTheme.DARK -> PagePalette(Color.Black, ColorFilter.colorMatrix(InvertColors))
-        PageTheme.SEPIA -> PagePalette(SepiaDeep, ColorFilter.tint(Sepia, BlendMode.Multiply))
+        PageTheme.SEPIA -> PagePalette(Sepia, ColorFilter.tint(Sepia, BlendMode.Multiply))
     }

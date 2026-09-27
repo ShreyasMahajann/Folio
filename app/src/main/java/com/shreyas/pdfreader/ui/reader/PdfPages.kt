@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -242,7 +242,6 @@ private fun ScrollPages(
     // The list is scaled around its centre, so its top and bottom edges fall off screen when zoomed.
     // This padding lets the first and last page scroll back into view.
     val edgePadding = with(density) { (scope.viewport.height * (1 - 1 / zoom.scale) / 2).toDp() }
-    val viewportHeight = with(density) { scope.viewport.height.toDp() }
 
     LazyColumn(
         state = listState,
@@ -265,11 +264,7 @@ private fun ScrollPages(
             },
     ) {
         items(count = pageCount, key = { it }) { page ->
-            val slot = when (scope.settings.fit) {
-                FitMode.WIDTH -> Modifier.fillMaxWidth()
-                FitMode.PAGE -> Modifier.fillMaxWidth().height(viewportHeight)
-            }
-            Box(slot, contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 PdfPage(
                     page = page,
                     widthPx = (scope.baseWidth(page) * renderScale).roundToInt(),
@@ -277,7 +272,10 @@ private fun ScrollPages(
                     theme = scope.settings.theme,
                     loadPage = scope.loadPage,
                     onAspectKnown = { scope.aspects[page] = it },
-                    modifier = Modifier.aspectRatio(scope.aspect(page)),
+                    // Whole-page fit narrows the page until its height fits the screen.
+                    modifier = Modifier
+                        .width(with(density) { scope.baseWidth(page).toDp() })
+                        .aspectRatio(scope.aspect(page)),
                 )
             }
         }

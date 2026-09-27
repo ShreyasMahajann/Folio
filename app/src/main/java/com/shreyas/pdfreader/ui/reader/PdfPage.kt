@@ -12,7 +12,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -48,9 +47,7 @@ fun PdfPage(
     }
 
     val palette = theme.palette
-    // The placeholder has the colour of an empty page under the same filter.
-    val paper = if (theme == PageTheme.DARK) Color.Black else if (theme == PageTheme.SEPIA) Color(0xFFF4ECD8) else Color.White
-    Box(modifier.background(paper)) {
+    Box(modifier.background(palette.background)) {
         bitmap?.let {
             Image(
                 bitmap = it,

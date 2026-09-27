@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
@@ -37,6 +38,7 @@ fun ReaderTopBar(
     bookmarked: Boolean,
     onBack: () -> Unit,
     onToggleBookmark: () -> Unit,
+    onSwitchTheme: () -> Unit,
     onShowBookmarks: () -> Unit,
     onShowSettings: () -> Unit,
     modifier: Modifier = Modifier,
@@ -57,6 +59,9 @@ fun ReaderTopBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             )
+            IconButton(onClick = onSwitchTheme) {
+                Icon(ReaderIcons.Theme, contentDescription = "Switch theme: light, sepia, dark")
+            }
             IconButton(onClick = onShowBookmarks) {
                 Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Bookmarks")
             }
@@ -96,6 +101,9 @@ fun ReaderBottomBar(
                         dragged = null
                     },
                     valueRange = 0f..(pageCount - 1).toFloat(),
+                    // The thumb sits at the screen edge on the first and last page.
+                    // Without this, a drag from there is the system back gesture.
+                    modifier = Modifier.systemGestureExclusion(),
                 )
             }
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {

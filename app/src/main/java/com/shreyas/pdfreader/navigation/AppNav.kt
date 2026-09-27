@@ -15,11 +15,13 @@ import com.shreyas.pdfreader.ui.library.LibraryScreen
 import com.shreyas.pdfreader.ui.library.importErrorMessage
 import com.shreyas.pdfreader.ui.reader.ReaderScreen
 import com.shreyas.pdfreader.ui.reader.ReaderViewModel
+import com.shreyas.pdfreader.ui.search.SearchScreen
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.receiveAsFlow
 
 private const val LIBRARY = "library"
 private const val READER = "reader"
+private const val SEARCH = "search"
 
 @Composable
 fun AppNav(container: AppContainer) {
@@ -41,7 +43,14 @@ fun AppNav(container: AppContainer) {
 
     NavHost(navController, startDestination = LIBRARY) {
         composable(LIBRARY) {
-            LibraryScreen(onOpen = { navController.openReader(it) })
+            LibraryScreen(
+                onOpen = { navController.openReader(it) },
+                onSearch = { navController.navigate(SEARCH) { launchSingleTop = true } },
+            )
+        }
+        composable(SEARCH) {
+            val backToLibrary = { navController.popBackStack(LIBRARY, inclusive = false) }
+            SearchScreen(onBack = { backToLibrary() }, onAdded = { backToLibrary() })
         }
         composable(
             route = "$READER/{${ReaderViewModel.DOCUMENT_ID_ARG}}",

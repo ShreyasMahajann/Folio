@@ -3,13 +3,31 @@
 A local PDF reader for Android with a reading experience modelled on e-book readers: the page fills the
 screen, controls stay hidden until you tap, and the app reopens every document where you stopped.
 
-No store, no account, no network permission, no ads, no analytics.
+No store, no account, no ads, no analytics. Reading works offline. The network is used only by the
+optional web search.
+
+## Screenshots
+
+Taken on a Samsung Galaxy A35 (Android 16) with the release build.
+
+| Library | Reading | Controls |
+|---|---|---|
+| ![Library](docs/screenshots/library.png) | ![Reading](docs/screenshots/reading.png) | ![Controls, dark theme](docs/screenshots/controls-dark.png) |
+
+| Light | Sepia | Settings |
+|---|---|---|
+| ![Light theme](docs/screenshots/controls-light.png) | ![Sepia theme](docs/screenshots/controls-sepia.png) | ![Settings](docs/screenshots/settings.png) |
+
+| Web search | Preview before adding |
+|---|---|
+| ![Web search](docs/screenshots/search.png) | ![Preview](docs/screenshots/preview.png) |
 
 ## Features
 
 | Area | What works in v1 |
 |---|---|
 | Import | Android file picker, "Open with", Share Sheet |
+| Web search | Searches the web for `filetype:pdf <name>` with Google or DuckDuckGo. A tapped PDF opens as a preview. It enters the library only after "Add to library" |
 | Library | Cover grid, progress, last-opened order, rename, remove |
 | Reader | Full screen, tap centre to show or hide controls, tap edges to turn the page |
 | Reading modes | Page turn (default) and vertical scroll |
@@ -18,7 +36,7 @@ No store, no account, no network permission, no ads, no analytics.
 | Navigation | Page scrubber, page number, percent read |
 | Position | Saved on every page turn. Survives app restart and device restart |
 | Bookmarks | Toggle per page, bookmark list with jump |
-| Themes | Light, sepia, dark |
+| Themes | Light, sepia, dark. One-tap switch in the top bar. Starts dark when the phone is in dark mode |
 | Comfort | Brightness (reader only), keep screen awake, orientation lock |
 
 Not in v1: highlights, annotations, text search, table of contents, thumbnails, reading statistics,
@@ -84,17 +102,19 @@ Single activity, Jetpack Compose, MVVM. ViewModels expose `StateFlow`. No depend
 app/src/main/java/com/shreyas/pdfreader/
   ReaderApp.kt            Application and AppContainer
   MainActivity.kt         Hosts Compose, receives "Open with" and Share intents
-  navigation/AppNav.kt    library -> reader/{documentId}
+  navigation/AppNav.kt    library -> reader/{documentId}, library -> search
   data/
     db/                   Room: documents, bookmarks
     LibraryRepository.kt  Import, remove, rename, progress, bookmarks, covers
     SettingsStore.kt      DataStore: reader settings
+    PdfDownloader.kt      Downloads a PDF from the web into the cache
   pdf/
     PdfDocumentRenderer.kt  Wraps android.graphics.pdf.PdfRenderer
     PageBitmapCache.kt      LRU cache bounded by bytes
   ui/
     library/              Library screen, card, ViewModel
     reader/               Reader screen, pages, zoom, bars, sheets, ViewModel
+    search/               Web search, PDF preview, ViewModel
     components/           Icons drawn for this app
     theme/                App theme, reader theme, page filters
   util/Progress.kt
@@ -111,6 +131,9 @@ app/src/main/java/com/shreyas/pdfreader/
   Files from "Open with" and the Share Sheet are copied into app storage, because Android ends that
   grant when the activity closes.
 - **Progress is stored on the document row**, written on every page turn.
+- **Web search shows the search engine in a WebView.** The app does not read or scrape the results.
+  It only catches a tap on a PDF link. The page gets no access to files or to app code.
+  A downloaded file stays in the cache until the user adds it. A discarded file is deleted.
 
 ### Memory
 
@@ -129,7 +152,10 @@ app/src/main/java/com/shreyas/pdfreader/
 - **Password-protected PDFs** do not open.
 - **A moved or deleted file** shows "File not available" in the library. Remove it and import it again.
 - **Pages of mixed sizes** shift a little in scroll mode the first time they appear.
-- No text layer: no selection, search, highlights, or links.
+- No text layer: no selection, search inside a PDF, highlights, or links.
+- **Google can ask for a CAPTCHA** in the web search. Solve it once, or switch to DuckDuckGo.
+- **Web search finds only PDFs that are public on the web.** Sites that need a login do not work.
+  You are responsible for the right to download a file.
 
 ## Future improvements
 
@@ -142,7 +168,10 @@ app/src/main/java/com/shreyas/pdfreader/
 
 ## Test status
 
-- Unit tests: progress and zoom maths.
+- Unit tests: progress, zoom maths, download file names.
 - Instrumented tests: database queries. They need a phone or emulator.
+- Manual test on a Samsung Galaxy A35, Android 16, release build: import, 600-page and 914-page PDFs,
+  page turn, scroll mode, zoom, scrubber, bookmarks, themes, position after force stop, web search,
+  preview, add and discard.
 
 APK size: about 3 MB for the release build, about 32 MB for the debug build.

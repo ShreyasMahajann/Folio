@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 
 data class LibraryItem(
     val document: DocumentEntity,
@@ -33,7 +34,7 @@ class LibraryRepository(private val context: Context, database: AppDatabase) {
     private val coversDir = File(context.filesDir, "covers")
 
     fun observeLibrary(): Flow<List<LibraryItem>> = documents.observeAll()
-        .map { list -> list.map { LibraryItem(it, isAvailable(it), coverFile(it.id)) } }
+        .map { list -> list.map { LibraryItem(it, isAvailable(it), coverFile(it.uri)) } }
         .flowOn(Dispatchers.IO)
 
     suspend fun get(id: Long): DocumentEntity? = documents.get(id)
@@ -58,7 +59,10 @@ class LibraryRepository(private val context: Context, database: AppDatabase) {
         try {
             val renderer = PdfDocumentRenderer.open(context, stored)
             try {
-                val id = documents.insert(
+                // Before the insert: the library shows the new row at once and reads the cover once.
+                // A missing cover is not a failed import. The card shows a placeholder.
+                runCatching { writeCover(renderer, stored.toString()) }
+                documents.insert(
                     DocumentEntity(
                         uri = stored.toString(),
                         title = fileName.removeSuffix(".pdf").removeSuffix(".PDF"),
@@ -67,14 +71,12 @@ class LibraryRepository(private val context: Context, database: AppDatabase) {
                         addedAt = System.currentTimeMillis(),
                     ),
                 )
-                // A missing cover is not a failed import. The card shows a placeholder.
-                runCatching { writeCover(renderer, id) }
-                id
             } finally {
                 renderer.close()
             }
         } catch (e: Exception) {
             releaseStorage(stored)
+            coverFile(stored.toString()).delete()
             throw e
         }
     }
@@ -82,7 +84,7 @@ class LibraryRepository(private val context: Context, database: AppDatabase) {
     suspend fun remove(document: DocumentEntity) = withContext(Dispatchers.IO) {
         documents.delete(document.id)
         releaseStorage(Uri.parse(document.uri))
-        coverFile(document.id).delete()
+        coverFile(document.uri).delete()
     }
 
     suspend fun rename(id: Long, title: String) = documents.rename(id, title)
@@ -102,7 +104,11 @@ class LibraryRepository(private val context: Context, database: AppDatabase) {
         }
     }
 
-    private fun coverFile(id: Long) = File(coversDir, "$id.webp")
+    /** Named after the URI, so the cover can be written before the document has an id. */
+    private fun coverFile(uri: String): File {
+        val digest = MessageDigest.getInstance("SHA-256").digest(uri.toByteArray())
+        return File(coversDir, digest.take(12).joinToString("") { "%02x".format(it) } + ".webp")
+    }
 
     private fun isAvailable(document: DocumentEntity): Boolean {
         val uri = Uri.parse(document.uri)
@@ -127,6 +133,7 @@ class LibraryRepository(private val context: Context, database: AppDatabase) {
                 }
             }
         }
+        if (uri.scheme == "file") size = File(requireNotNull(uri.path)).length()
         return (name ?: uri.lastPathSegment ?: "Document.pdf") to size
     }
 
@@ -157,10 +164,10 @@ class LibraryRepository(private val context: Context, database: AppDatabase) {
         }
     }
 
-    private suspend fun writeCover(renderer: PdfDocumentRenderer, id: Long) {
+    private suspend fun writeCover(renderer: PdfDocumentRenderer, uri: String) {
         coversDir.mkdirs()
         val bitmap = renderer.render(page = 0, widthPx = COVER_WIDTH_PX, maxPixels = COVER_WIDTH_PX * COVER_WIDTH_PX * 2)
-        coverFile(id).outputStream().use { bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, it) }
+        coverFile(uri).outputStream().use { bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, it) }
     }
 
     private companion object {
