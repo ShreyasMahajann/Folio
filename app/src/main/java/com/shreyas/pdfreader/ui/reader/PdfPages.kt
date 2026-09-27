@@ -40,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import com.shreyas.pdfreader.data.FitMode
 import com.shreyas.pdfreader.data.ReaderSettings
 import com.shreyas.pdfreader.data.ReadingMode
+import com.shreyas.pdfreader.pdf.PageEdits
+import com.shreyas.pdfreader.pdf.positionOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
@@ -59,10 +61,18 @@ private class PageScope(
     val settings: ReaderSettings,
     val defaultAspect: Float,
     val loadPage: PageLoader,
+    /** Zero-based page numbers of the file, in reading order. Deleted pages are not in the list. */
+    val pages: List<Int>,
+    val edits: PageEdits,
 ) {
     val aspects = mutableStateMapOf<Int, Float>()
 
-    fun aspect(page: Int) = aspects[page] ?: defaultAspect
+    /** Shape of a page as shown, with its crop. Exact once the page was rendered. */
+    fun aspect(page: Int): Float {
+        aspects[page]?.let { return it }
+        val crop = edits.cropFor(page) ?: return defaultAspect
+        return defaultAspect * crop.width / crop.height
+    }
 
     /** Page width on screen at zoom 1. */
     fun baseWidth(page: Int): Float = when (settings.fit) {
@@ -71,10 +81,17 @@ private class PageScope(
     }
 }
 
+/**
+ * The pages of a book in the chosen reading mode.
+ * [currentPage], [jumps] and [onPageChanged] use page numbers of the file, not positions in [pages].
+ * The pages follow [currentPage] when [pages] changes. At other times the pages lead and report
+ * through [onPageChanged].
+ */
 @Composable
 fun PdfPages(
-    pageCount: Int,
-    initialPage: Int,
+    pages: List<Int>,
+    edits: PageEdits,
+    currentPage: Int,
     defaultAspect: Float,
     settings: ReaderSettings,
     chromeVisible: Boolean,
@@ -106,15 +123,15 @@ fun PdfPages(
             },
     ) {
         if (viewport.width > 0 && viewport.height > 0) {
-            val scope = remember(viewport, settings, defaultAspect, loadPage) {
-                PageScope(viewport, settings, defaultAspect, loadPage)
+            val scope = remember(viewport, settings, defaultAspect, loadPage, pages, edits) {
+                PageScope(viewport, settings, defaultAspect, loadPage, pages, edits)
             }
             when (settings.mode) {
                 ReadingMode.PAGED -> PagedPages(
-                    scope, pageCount, initialPage, zoom, renderScale, chromeVisible, jumps, onPageChanged, onToggleChrome,
+                    scope, currentPage, zoom, renderScale, chromeVisible, jumps, onPageChanged, onToggleChrome,
                 )
                 ReadingMode.SCROLL -> ScrollPages(
-                    scope, pageCount, initialPage, zoom, renderScale, jumps, onPageChanged, onToggleChrome,
+                    scope, currentPage, zoom, renderScale, jumps, onPageChanged, onToggleChrome,
                 )
             }
         }
@@ -124,8 +141,7 @@ fun PdfPages(
 @Composable
 private fun PagedPages(
     scope: PageScope,
-    pageCount: Int,
-    initialPage: Int,
+    currentPage: Int,
     zoom: ZoomState,
     renderScale: Float,
     chromeVisible: Boolean,
@@ -133,7 +149,9 @@ private fun PagedPages(
     onPageChanged: (Int) -> Unit,
     onToggleChrome: () -> Unit,
 ) {
-    val pagerState = rememberPagerState(initialPage = initialPage) { pageCount }
+    val pages by rememberUpdatedState(scope.pages)
+    val current by rememberUpdatedState(currentPage)
+    val pagerState = rememberPagerState(initialPage = positionOf(scope.pages, currentPage)) { pages.size }
     val coroutineScope = rememberCoroutineScope()
     val chromeShown by rememberUpdatedState(chromeVisible)
     val toggleChrome by rememberUpdatedState(onToggleChrome)
@@ -143,14 +161,20 @@ private fun PagedPages(
         zoom.panVertically = true
         zoom.onListScroll = {}
     }
-    LaunchedEffect(pagerState) { snapshotFlow { pagerState.currentPage }.collect { pageChanged(it) } }
+    // Restarts when pages are deleted or restored: the same position then holds another page.
+    LaunchedEffect(pagerState, scope.pages) {
+        pagerState.scrollToPage(positionOf(scope.pages, current))
+        snapshotFlow { pagerState.currentPage }.collect { position ->
+            scope.pages.getOrNull(position)?.let { pageChanged(it) }
+        }
+    }
     LaunchedEffect(pagerState.currentPage) { zoom.reset() }
-    LaunchedEffect(jumps) { jumps.collect { pagerState.scrollToPage(it) } }
+    LaunchedEffect(jumps) { jumps.collect { pagerState.scrollToPage(positionOf(pages, it)) } }
 
     HorizontalPager(
         state = pagerState,
         beyondViewportPageCount = 1,
-        key = { it },
+        key = { scope.pages.getOrElse(it) { -1 } },
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(zoom) { detectReaderZoom(zoom, paged = true) }
@@ -163,15 +187,16 @@ private fun PagedPages(
                             chromeShown || zoom.isZoomed -> toggleChrome()
                             position.x < size.width * 0.25f && current > 0 ->
                                 coroutineScope.launch { pagerState.animateScrollToPage(current - 1) }
-                            position.x > size.width * 0.75f && current < pageCount - 1 ->
+                            position.x > size.width * 0.75f && current < pages.size - 1 ->
                                 coroutineScope.launch { pagerState.animateScrollToPage(current + 1) }
                             else -> toggleChrome()
                         }
                     },
                 )
             },
-    ) { page ->
-        val isCurrent = page == pagerState.currentPage
+    ) { position ->
+        val page = scope.pages.getOrNull(position) ?: return@HorizontalPager
+        val isCurrent = position == pagerState.currentPage
         val width = (scope.baseWidth(page) * if (isCurrent) renderScale else 1f).roundToInt()
         val pageModifier = Modifier.aspectRatio(scope.aspect(page))
 
@@ -181,7 +206,7 @@ private fun PagedPages(
                 .fillMaxSize()
                 .clipToBounds()
                 .graphicsLayer {
-                    if (page == pagerState.currentPage) {
+                    if (position == pagerState.currentPage) {
                         scaleX = zoom.scale
                         scaleY = zoom.scale
                         translationX = zoom.offset.x
@@ -197,6 +222,7 @@ private fun PagedPages(
                     theme = scope.settings.theme,
                     loadPage = scope.loadPage,
                     onAspectKnown = { scope.aspects[page] = it },
+                    version = scope.edits.cropFor(page),
                     modifier = modifier,
                 )
             }
@@ -217,15 +243,16 @@ private fun PagedPages(
 @Composable
 private fun ScrollPages(
     scope: PageScope,
-    pageCount: Int,
-    initialPage: Int,
+    currentPage: Int,
     zoom: ZoomState,
     renderScale: Float,
     jumps: Flow<Int>,
     onPageChanged: (Int) -> Unit,
     onToggleChrome: () -> Unit,
 ) {
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialPage)
+    val pages by rememberUpdatedState(scope.pages)
+    val current by rememberUpdatedState(currentPage)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = positionOf(scope.pages, currentPage))
     val coroutineScope = rememberCoroutineScope()
     val toggleChrome by rememberUpdatedState(onToggleChrome)
     val pageChanged by rememberUpdatedState(onPageChanged)
@@ -236,8 +263,16 @@ private fun ScrollPages(
         zoom.panVertically = false
         zoom.onListScroll = { listState.dispatchRawDelta(it) }
     }
-    LaunchedEffect(listState) { snapshotFlow { listState.pageAtCentre() }.collect { pageChanged(it) } }
-    LaunchedEffect(jumps) { jumps.collect { listState.scrollToItem(it) } }
+    LaunchedEffect(listState, scope.pages) {
+        // Scroll only when needed. A scroll puts the page at the top and loses the place inside it.
+        if (scope.pages.getOrNull(listState.pageAtCentre()) != current) {
+            listState.scrollToItem(positionOf(scope.pages, current))
+        }
+        snapshotFlow { listState.pageAtCentre() }.collect { position ->
+            scope.pages.getOrNull(position)?.let { pageChanged(it) }
+        }
+    }
+    LaunchedEffect(jumps) { jumps.collect { listState.scrollToItem(positionOf(pages, it)) } }
 
     // The list is scaled around its centre, so its top and bottom edges fall off screen when zoomed.
     // This padding lets the first and last page scroll back into view.
@@ -263,7 +298,8 @@ private fun ScrollPages(
                 translationX = zoom.offset.x
             },
     ) {
-        items(count = pageCount, key = { it }) { page ->
+        items(count = scope.pages.size, key = { scope.pages[it] }) { position ->
+            val page = scope.pages[position]
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 PdfPage(
                     page = page,
@@ -272,6 +308,7 @@ private fun ScrollPages(
                     theme = scope.settings.theme,
                     loadPage = scope.loadPage,
                     onAspectKnown = { scope.aspects[page] = it },
+                    version = scope.edits.cropFor(page),
                     // Whole-page fit narrows the page until its height fits the screen.
                     modifier = Modifier
                         .width(with(density) { scope.baseWidth(page).toDp() })

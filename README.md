@@ -18,17 +18,29 @@ Taken on a Samsung Galaxy A35 (Android 16) with the release build.
 |---|---|---|
 | ![Light theme](docs/screenshots/controls-light.png) | ![Sepia theme](docs/screenshots/controls-sepia.png) | ![Settings](docs/screenshots/settings.png) |
 
-| Web search | Preview before adding |
-|---|---|
-| ![Web search](docs/screenshots/search.png) | ![Preview](docs/screenshots/preview.png) |
+| Web search | Preview before adding | Search history |
+|---|---|---|
+| ![Web search](docs/screenshots/search.png) | ![Preview](docs/screenshots/preview.png) | ![Search history](docs/screenshots/history.png) |
+
+| Choose cover | Page actions | Crop |
+|---|---|---|
+| ![Choose cover](docs/screenshots/cover.png) | ![Page actions](docs/screenshots/page-actions.png) | ![Crop](docs/screenshots/crop.png) |
+
+Update notice in the library:
+
+![Update notice](docs/screenshots/update-banner.png)
 
 ## Features
 
 | Area | What works in v1 |
 |---|---|
 | Import | Android file picker, "Open with", Share Sheet |
-| Web search | Searches the web for `filetype:pdf <name>` with Google or DuckDuckGo. A tapped PDF opens as a preview. It enters the library only after "Add to library" |
+| Web search | Searches the web for `filetype:pdf <name>` with Google or DuckDuckGo. A tapped PDF opens as a preview. It enters the library only after "Add to library". Keeps the last 20 searches, with **Clear history** |
 | Library | Cover grid, progress, last-opened order, rename, remove |
+| Covers | Long press a book, then **Change cover**: a page of the PDF, a photo from the phone, or an image from the web (long-press an image, or paste its link) |
+| Delete pages | Removes pages from the reader's view, with Undo. **Manage pages** deletes and restores many pages |
+| Crop pages | Draw the visible area of a page. Applies to one page or to all pages |
+| Updates | The library shows a notice when a newer release is on GitHub. **Download** opens the release page |
 | Reader | Full screen, tap centre to show or hide controls, tap edges to turn the page |
 | Reading modes | Page turn (default) and vertical scroll |
 | Page fit | Whole page or full width |
@@ -105,17 +117,23 @@ app/src/main/java/com/shreyas/pdfreader/
   navigation/AppNav.kt    library -> reader/{documentId}, library -> search
   data/
     db/                   Room: documents, bookmarks
-    LibraryRepository.kt  Import, remove, rename, progress, bookmarks, covers
+    LibraryRepository.kt  Import, remove, rename, progress, bookmarks, covers, page edits
+    CoverWriter.kt        Loads images for covers, stores covers
+    UpdateChecker.kt      Reads the newest release from GitHub
     SettingsStore.kt      DataStore: reader settings
     PdfDownloader.kt      Downloads a PDF from the web into the cache
   pdf/
     PdfDocumentRenderer.kt  Wraps android.graphics.pdf.PdfRenderer
     PageBitmapCache.kt      LRU cache bounded by bytes
+    PageSource.kt           One open PDF with its cache, shared by all screens
+    PageEdits.kt            Deleted pages and crops, crop box maths
   ui/
     library/              Library screen, card, ViewModel
     reader/               Reader screen, pages, zoom, bars, sheets, ViewModel
     search/               Web search, PDF preview, ViewModel
-    components/           Icons drawn for this app
+    cover/                Cover selection
+    pages/                Page manager
+    components/           Icons drawn for this app, page grid
     theme/                App theme, reader theme, page filters
   util/Progress.kt
 ```
@@ -131,6 +149,12 @@ app/src/main/java/com/shreyas/pdfreader/
   Files from "Open with" and the Share Sheet are copied into app storage, because Android ends that
   grant when the activity closes.
 - **Progress is stored on the document row**, written on every page turn.
+- **Delete and crop do not change the PDF file.** The framework renderer cannot write PDF files, and
+  files from the file picker are read-only for the app. Folio stores the edits in its database and
+  applies them when it draws a page. Every edit can be undone. A cropped area is rendered at full
+  sharpness, not enlarged from a picture of the whole page.
+- **The update check reads one public GitHub address**, at most once per day. It sends no data about
+  the phone or the library.
 - **Web search shows the search engine in a WebView.** The app does not read or scrape the results.
   It only catches a tap on a PDF link. The page gets no access to files or to app code.
   A downloaded file stays in the cache until the user adds it. A discarded file is deleted.
@@ -152,6 +176,10 @@ app/src/main/java/com/shreyas/pdfreader/
 - **Password-protected PDFs** do not open.
 - **A moved or deleted file** shows "File not available" in the library. Remove it and import it again.
 - **Pages of mixed sizes** shift a little in scroll mode the first time they appear.
+- **Deleted and cropped pages exist only in Folio.** Another app that opens the same PDF shows the
+  whole file. A book that is removed from the library loses its page edits.
+- **Updates are not installed by the app.** The notice opens the release page. Download and install
+  the APK from there.
 - No text layer: no selection, search inside a PDF, highlights, or links.
 - **Google can ask for a CAPTCHA** in the web search. Solve it once, or switch to DuckDuckGo.
 - **Web search finds only PDFs that are public on the web.** Sites that need a login do not work.
@@ -168,7 +196,8 @@ app/src/main/java/com/shreyas/pdfreader/
 
 ## Test status
 
-- Unit tests: progress, zoom maths, download file names.
+- Unit tests: progress, zoom maths, download file names, version comparison, search history,
+  page mapping, crop box maths.
 - Instrumented tests: database queries. They need a phone or emulator.
 - Manual test on a Samsung Galaxy A35, Android 16, release build: import, 600-page and 914-page PDFs,
   page turn, scroll mode, zoom, scrubber, bookmarks, themes, position after force stop, web search,

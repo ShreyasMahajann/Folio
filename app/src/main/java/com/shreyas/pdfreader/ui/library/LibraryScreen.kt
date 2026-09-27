@@ -1,11 +1,14 @@
 package com.shreyas.pdfreader.ui.library
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -26,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -37,19 +41,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.shreyas.pdfreader.data.Release
 import com.shreyas.pdfreader.data.db.DocumentEntity
 
 @Composable
 fun LibraryScreen(
     onOpen: (documentId: Long) -> Unit,
     onSearch: () -> Unit,
+    onChangeCover: (documentId: Long) -> Unit,
     viewModel: LibraryViewModel = viewModel(factory = LibraryViewModel.Factory),
 ) {
+    val context = LocalContext.current
+    val update by viewModel.update.collectAsStateWithLifecycle()
     val items by viewModel.items.collectAsStateWithLifecycle()
     val importing by viewModel.importing.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
@@ -79,29 +88,39 @@ fun LibraryScreen(
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        Box(Modifier.fillMaxSize().padding(padding)) {
-            val loaded = items
-            when {
-                loaded == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                loaded.isEmpty() -> EmptyLibrary(onImport = pickPdf, modifier = Modifier.align(Alignment.Center))
-                else -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 132.dp),
-                    contentPadding = PaddingValues(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(loaded, key = { it.document.id }) { item ->
-                        DocumentCard(
-                            item = item,
-                            onOpen = { onOpen(item.document.id) },
-                            onRename = { renaming = item.document },
-                            onRemove = { removing = item.document },
-                        )
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            update?.let { release ->
+                UpdateBanner(
+                    release = release,
+                    onDownload = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.url))) },
+                    onLater = { viewModel.dismissUpdate(release) },
+                )
+            }
+            Box(Modifier.fillMaxSize()) {
+                val loaded = items
+                when {
+                    loaded == null -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    loaded.isEmpty() -> EmptyLibrary(onImport = pickPdf, modifier = Modifier.align(Alignment.Center))
+                    else -> LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 132.dp),
+                        contentPadding = PaddingValues(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(loaded, key = { it.document.id }) { item ->
+                            DocumentCard(
+                                item = item,
+                                onOpen = { onOpen(item.document.id) },
+                                onRename = { renaming = item.document },
+                                onChangeCover = { onChangeCover(item.document.id) },
+                                onRemove = { removing = item.document },
+                            )
+                        }
                     }
                 }
+                if (importing) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
             }
-            if (importing) LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
         }
     }
 
@@ -130,6 +149,25 @@ fun LibraryScreen(
             },
             dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } },
         )
+    }
+}
+
+@Composable
+private fun UpdateBanner(release: Release, onDownload: () -> Unit, onLater: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 16.dp, end = 4.dp),
+        ) {
+            Text(
+                text = "Version ${release.version} is available",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onLater) { Text("Later") }
+            TextButton(onClick = onDownload) { Text("Download") }
+        }
     }
 }
 

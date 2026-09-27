@@ -3,6 +3,7 @@ package com.shreyas.pdfreader.pdf
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.ParcelFileDescriptor
@@ -42,10 +43,13 @@ class PdfDocumentRenderer private constructor(
      * Renders [page] at [widthPx] wide. The bitmap is scaled down when it would exceed [maxPixels],
      * so a huge page or a high zoom cannot exhaust memory.
      */
-    suspend fun render(page: Int, widthPx: Int, maxPixels: Int): Bitmap = withContext(dispatcher) {
+    suspend fun render(page: Int, widthPx: Int, maxPixels: Int, crop: PageCrop? = null): Bitmap = withContext(dispatcher) {
         ensureOpen()
         renderer.openPage(page).use { pdfPage ->
-            val aspect = pdfPage.width.toFloat() / pdfPage.height
+            val area = crop ?: PageCrop.FULL
+            val areaWidth = pdfPage.width * area.width
+            val areaHeight = pdfPage.height * area.height
+            val aspect = areaWidth / areaHeight
             var width = widthPx.coerceAtLeast(1)
             var height = (width / aspect).roundToInt().coerceAtLeast(1)
             val pixels = width.toLong() * height
@@ -57,7 +61,16 @@ class PdfDocumentRenderer private constructor(
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             // PDF pages have no background of their own. Without this, pages come out transparent.
             bitmap.eraseColor(Color.WHITE)
-            pdfPage.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            // The matrix maps page points to bitmap pixels. With a crop, only the cropped area
+            // lands on the bitmap, at full sharpness.
+            val transform = crop?.let {
+                val scale = width / areaWidth
+                Matrix().apply {
+                    setTranslate(-it.left * pdfPage.width, -it.top * pdfPage.height)
+                    postScale(scale, scale)
+                }
+            }
+            pdfPage.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
             bitmap
         }
     }

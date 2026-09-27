@@ -8,9 +8,15 @@ import android.provider.OpenableColumns
 import com.shreyas.pdfreader.data.db.AppDatabase
 import com.shreyas.pdfreader.data.db.BookmarkEntity
 import com.shreyas.pdfreader.data.db.DocumentEntity
+import androidx.room.withTransaction
+import com.shreyas.pdfreader.pdf.ALL_PAGES
+import com.shreyas.pdfreader.pdf.PageCrop
+import com.shreyas.pdfreader.pdf.PageEdits
 import com.shreyas.pdfreader.pdf.PdfDocumentRenderer
+import com.shreyas.pdfreader.pdf.positionOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -23,19 +29,44 @@ data class LibraryItem(
     /** False when the read grant is gone or the copied file was deleted. */
     val available: Boolean,
     val cover: File,
+    /** Changes when the cover file is replaced. The file path stays the same. */
+    val coverVersion: Long,
+    /** Pages the reader shows: pages of the file without deleted pages. */
+    val pageCount: Int,
+    /** One-based position of the reader among the shown pages. */
+    val pageNumber: Int,
 )
 
-class LibraryRepository(private val context: Context, database: AppDatabase) {
+class LibraryRepository(
+    private val context: Context,
+    private val database: AppDatabase,
+    private val covers: CoverWriter,
+) {
 
     private val documents = database.documentDao()
     private val bookmarks = database.bookmarkDao()
+    private val pageEdits = database.pageEditDao()
     private val resolver get() = context.contentResolver
     private val copiesDir = File(context.filesDir, "documents")
     private val coversDir = File(context.filesDir, "covers")
 
-    fun observeLibrary(): Flow<List<LibraryItem>> = documents.observeAll()
-        .map { list -> list.map { LibraryItem(it, isAvailable(it), coverFile(it.uri)) } }
-        .flowOn(Dispatchers.IO)
+    fun observeLibrary(): Flow<List<LibraryItem>> =
+        combine(documents.observeAll(), pageEdits.observeHidden()) { list, hidden ->
+            val hiddenPages = hidden.groupBy({ it.documentId }, { it.page })
+            list.map { document ->
+                val cover = coverFile(document.uri)
+                val pages = PageEdits(hidden = hiddenPages[document.id].orEmpty().toSet())
+                    .visiblePages(document.pageCount)
+                LibraryItem(
+                    document = document,
+                    available = isAvailable(document),
+                    cover = cover,
+                    coverVersion = cover.lastModified(),
+                    pageCount = pages.size,
+                    pageNumber = positionOf(pages, document.currentPage) + 1,
+                )
+            }
+        }.flowOn(Dispatchers.IO)
 
     suspend fun get(id: Long): DocumentEntity? = documents.get(id)
 
@@ -104,6 +135,56 @@ class LibraryRepository(private val context: Context, database: AppDatabase) {
         }
     }
 
+    /** Replaces the cover of [document] with [image]. */
+    suspend fun setCover(document: DocumentEntity, image: Bitmap) = withContext(Dispatchers.IO) {
+        covers.write(image, coverFile(document.uri))
+        documents.touch(document.id)
+    }
+
+    fun observePageEdits(documentId: Long): Flow<PageEdits> = pageEdits.observe(documentId).map { rows ->
+        PageEdits(
+            hidden = rows.filter { it.hidden }.map { it.page }.toSet(),
+            crops = rows.mapNotNull { row ->
+                val left = row.cropLeft ?: return@mapNotNull null
+                val top = row.cropTop ?: return@mapNotNull null
+                val right = row.cropRight ?: return@mapNotNull null
+                val bottom = row.cropBottom ?: return@mapNotNull null
+                row.page to PageCrop(left, top, right, bottom)
+            }.toMap(),
+        )
+    }
+
+    /** Deletes [pages] from the reader's view, or restores them. The PDF file is not changed. */
+    suspend fun setPagesHidden(documentId: Long, pages: Collection<Int>, hidden: Boolean) = database.withTransaction {
+        pages.forEach { page ->
+            pageEdits.ensureRow(documentId, page)
+            pageEdits.setHidden(documentId, page, hidden)
+        }
+        pageEdits.prune(documentId)
+    }
+
+    suspend fun restoreAllPages(documentId: Long) = database.withTransaction {
+        pageEdits.showAll(documentId)
+        pageEdits.prune(documentId)
+    }
+
+    /** Sets the crop of one page. [crop] null removes it. Use [setBookCrop] for all pages. */
+    suspend fun setPageCrop(documentId: Long, page: Int, crop: PageCrop?) = database.withTransaction {
+        pageEdits.ensureRow(documentId, page)
+        pageEdits.setCrop(documentId, page, crop?.left, crop?.top, crop?.right, crop?.bottom)
+        pageEdits.prune(documentId)
+    }
+
+    /** Sets one crop for all pages and removes the crops of single pages. [crop] null removes every crop. */
+    suspend fun setBookCrop(documentId: Long, crop: PageCrop?) = database.withTransaction {
+        pageEdits.clearCrops(documentId)
+        if (crop != null) {
+            pageEdits.ensureRow(documentId, ALL_PAGES)
+            pageEdits.setCrop(documentId, ALL_PAGES, crop.left, crop.top, crop.right, crop.bottom)
+        }
+        pageEdits.prune(documentId)
+    }
+
     /** Named after the URI, so the cover can be written before the document has an id. */
     private fun coverFile(uri: String): File {
         val digest = MessageDigest.getInstance("SHA-256").digest(uri.toByteArray())
@@ -165,12 +246,7 @@ class LibraryRepository(private val context: Context, database: AppDatabase) {
     }
 
     private suspend fun writeCover(renderer: PdfDocumentRenderer, uri: String) {
-        coversDir.mkdirs()
-        val bitmap = renderer.render(page = 0, widthPx = COVER_WIDTH_PX, maxPixels = COVER_WIDTH_PX * COVER_WIDTH_PX * 2)
-        coverFile(uri).outputStream().use { bitmap.compress(Bitmap.CompressFormat.WEBP_LOSSY, 80, it) }
-    }
-
-    private companion object {
-        const val COVER_WIDTH_PX = 400
+        val width = CoverWriter.COVER_WIDTH_PX
+        covers.write(renderer.render(page = 0, widthPx = width, maxPixels = width * width * 2), coverFile(uri))
     }
 }

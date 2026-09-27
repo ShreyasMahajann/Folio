@@ -11,17 +11,17 @@ import android.util.LruCache
  */
 class PageBitmapCache(maxBytes: Int) {
 
-    private val cache = object : LruCache<Long, Bitmap>(maxBytes) {
-        override fun sizeOf(key: Long, value: Bitmap): Int = value.allocationByteCount
+    private data class Key(val page: Int, val widthPx: Int, val crop: PageCrop?)
+
+    private val cache = object : LruCache<Key, Bitmap>(maxBytes) {
+        override fun sizeOf(key: Key, value: Bitmap): Int = value.allocationByteCount
     }
 
-    fun get(page: Int, widthPx: Int): Bitmap? = cache.get(key(page, widthPx))
+    fun get(page: Int, widthPx: Int, crop: PageCrop?): Bitmap? = cache.get(Key(page, widthPx, crop))
 
-    fun put(page: Int, widthPx: Int, bitmap: Bitmap) {
-        cache.put(key(page, widthPx), bitmap)
+    fun put(page: Int, widthPx: Int, crop: PageCrop?, bitmap: Bitmap) {
+        cache.put(Key(page, widthPx, crop), bitmap)
     }
 
     fun clear() = cache.evictAll()
-
-    private fun key(page: Int, widthPx: Int): Long = (page.toLong() shl 32) or widthPx.toLong()
 }

@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -28,6 +29,14 @@ data class ReaderSettings(
     val lockOrientation: Boolean = false,
     /** 0..1, or null to follow the system brightness. */
     val brightness: Float? = null,
+)
+
+data class UpdateState(
+    /** Time of the last successful check, in milliseconds. 0 when never checked. */
+    val lastCheck: Long,
+    val latest: Release?,
+    /** The version the user answered "Later" to. */
+    val dismissedVersion: String?,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "reader_settings")
@@ -56,6 +65,44 @@ class SettingsStore(private val context: Context) {
         }
     }
 
+    /** Past web searches, newest first. */
+    val searchHistory: Flow<List<String>> = context.dataStore.data.map { prefs ->
+        prefs[SEARCH_HISTORY].orEmpty().split('\n').filter { it.isNotBlank() }
+    }
+
+    suspend fun addSearch(query: String) {
+        context.dataStore.edit { prefs ->
+            val history = prefs[SEARCH_HISTORY].orEmpty().split('\n').filter { it.isNotBlank() }
+            prefs[SEARCH_HISTORY] = updatedHistory(history, query).joinToString("\n")
+        }
+    }
+
+    suspend fun clearSearchHistory() {
+        context.dataStore.edit { it.remove(SEARCH_HISTORY) }
+    }
+
+    val updateState: Flow<UpdateState> = context.dataStore.data.map { prefs ->
+        val version = prefs[LATEST_VERSION]
+        val url = prefs[LATEST_URL]
+        UpdateState(
+            lastCheck = prefs[LAST_UPDATE_CHECK] ?: 0L,
+            latest = if (version != null && url != null) Release(version, url) else null,
+            dismissedVersion = prefs[DISMISSED_VERSION],
+        )
+    }
+
+    suspend fun saveLatestRelease(release: Release, checkedAt: Long) {
+        context.dataStore.edit { prefs ->
+            prefs[LAST_UPDATE_CHECK] = checkedAt
+            prefs[LATEST_VERSION] = release.version
+            prefs[LATEST_URL] = release.url
+        }
+    }
+
+    suspend fun dismissUpdate(version: String) {
+        context.dataStore.edit { it[DISMISSED_VERSION] = version }
+    }
+
     /** The theme until the reader picks one: dark when the phone is in dark mode. */
     private fun systemTheme(): PageTheme {
         val night = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
@@ -72,5 +119,10 @@ class SettingsStore(private val context: Context) {
         val KEEP_AWAKE = booleanPreferencesKey("keep_awake")
         val LOCK_ORIENTATION = booleanPreferencesKey("lock_orientation")
         val BRIGHTNESS = floatPreferencesKey("brightness")
+        val SEARCH_HISTORY = stringPreferencesKey("search_history")
+        val LAST_UPDATE_CHECK = longPreferencesKey("last_update_check")
+        val LATEST_VERSION = stringPreferencesKey("latest_version")
+        val LATEST_URL = stringPreferencesKey("latest_url")
+        val DISMISSED_VERSION = stringPreferencesKey("dismissed_version")
     }
 }

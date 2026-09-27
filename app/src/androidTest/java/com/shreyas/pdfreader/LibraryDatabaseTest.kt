@@ -45,6 +45,31 @@ class LibraryDatabaseTest {
     }
 
     @Test
+    fun pageEditsKeepCropWhenPageIsDeletedAndLeaveWithDocument() = runTest {
+        val edits = database.pageEditDao()
+        val id = documents.insert(document("doc", addedAt = 1))
+
+        edits.ensureRow(id, 3)
+        edits.setCrop(id, 3, 0.1f, 0.2f, 0.9f, 0.8f)
+        edits.ensureRow(id, 3)
+        edits.setHidden(id, 3, true)
+        val row = edits.observe(id).first().single()
+        assertEquals(true, row.hidden)
+        assertEquals(0.1f, row.cropLeft)
+
+        // A page that is visible and not cropped needs no row.
+        edits.setHidden(id, 3, false)
+        edits.clearCrops(id)
+        edits.prune(id)
+        assertEquals(0, edits.observe(id).first().size)
+
+        edits.ensureRow(id, 5)
+        edits.setHidden(id, 5, true)
+        documents.delete(id)
+        assertEquals(0, edits.observe(id).first().size)
+    }
+
+    @Test
     fun bookmarksAreUniquePerPageAndLeaveWithDocument() = runTest {
         val id = documents.insert(document("doc", addedAt = 1))
         bookmarks.insert(BookmarkEntity(documentId = id, page = 4, createdAt = 1))

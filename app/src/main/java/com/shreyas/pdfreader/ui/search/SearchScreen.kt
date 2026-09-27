@@ -7,6 +7,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -53,6 +56,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -71,6 +75,7 @@ fun SearchScreen(
     viewModel: SearchViewModel = viewModel(factory = SearchViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val history by viewModel.history.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
     val keyboard = LocalSoftwareKeyboardController.current
     val focus = remember { FocusRequester() }
@@ -97,6 +102,7 @@ fun SearchScreen(
         if (query.isBlank()) return
         keyboard?.hide()
         searched = true
+        viewModel.recordSearch(query)
         webView.loadUrl(engine.searchUrl(query))
     }
 
@@ -151,7 +157,7 @@ fun SearchScreen(
                 if (pageProgress < 1f) {
                     LinearProgressIndicator(progress = { pageProgress }, modifier = Modifier.fillMaxWidth())
                 }
-            } else {
+            } else if (history.isEmpty()) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.align(Alignment.Center).padding(32.dp),
@@ -165,6 +171,15 @@ fun SearchScreen(
                         modifier = Modifier.padding(top = 12.dp),
                     )
                 }
+            } else {
+                SearchHistory(
+                    history = history,
+                    onSearch = {
+                        query = it
+                        search()
+                    },
+                    onClear = viewModel::clearHistory,
+                )
             }
         }
     }
@@ -193,6 +208,38 @@ fun SearchScreen(
             },
             confirmButton = { TextButton(onClick = viewModel::cancelDownload) { Text("Cancel") } },
         )
+    }
+}
+
+@Composable
+private fun SearchHistory(history: List<String>, onSearch: (String) -> Unit, onClear: () -> Unit) {
+    LazyColumn(Modifier.fillMaxSize()) {
+        item {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp),
+            ) {
+                Text(
+                    text = "Recent searches",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onClear) { Text("Clear history") }
+            }
+        }
+        items(history, key = { it }) { entry ->
+            Text(
+                text = entry,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSearch(entry) }
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
+            )
+        }
     }
 }
 

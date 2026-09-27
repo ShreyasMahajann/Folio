@@ -10,9 +10,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,13 +35,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shreyas.pdfreader.data.ReaderSettings
 import com.shreyas.pdfreader.data.db.BookmarkEntity
+import com.shreyas.pdfreader.pdf.PageCrop
+import com.shreyas.pdfreader.pdf.positionOf
 import com.shreyas.pdfreader.ui.theme.ReaderTheme
 import com.shreyas.pdfreader.ui.theme.palette
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.launch
 
 @Composable
 fun ReaderScreen(
     onBack: () -> Unit,
+    onManagePages: () -> Unit,
     viewModel: ReaderViewModel = viewModel(factory = ReaderViewModel.Factory),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -58,7 +67,7 @@ fun ReaderScreen(
             CircularProgressIndicator()
         }
         else -> ReaderTheme(loadedSettings.theme) {
-            ReaderContent(state, loadedSettings, bookmarks, viewModel, onBack)
+            ReaderContent(state, loadedSettings, bookmarks, viewModel, onBack, onManagePages)
         }
     }
 }
@@ -70,24 +79,32 @@ private fun ReaderContent(
     bookmarks: List<BookmarkEntity>,
     viewModel: ReaderViewModel,
     onBack: () -> Unit,
+    onManagePages: () -> Unit,
 ) {
     var chromeVisible by rememberSaveable { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
+    // Page number of the file that is open in the crop screen.
+    var cropping by remember { mutableStateOf<Int?>(null) }
+    val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     val jumps = remember { MutableSharedFlow<Int>(extraBufferCapacity = 1) }
     val loadPage: PageLoader = remember(viewModel) { viewModel::pageBitmap }
 
     fun jumpTo(page: Int) {
-        viewModel.onPageChanged(page)
-        jumps.tryEmit(page)
+        // A bookmark can point at a deleted page. The reader opens the next page that is left.
+        val target = state.pages.getOrNull(positionOf(state.pages, page)) ?: return
+        viewModel.onPageChanged(target)
+        jumps.tryEmit(target)
     }
 
     ReaderWindowEffects(settings, chromeVisible)
 
     Box(Modifier.fillMaxSize().background(settings.theme.palette.background)) {
         PdfPages(
-            pageCount = state.pageCount,
-            initialPage = state.currentPage,
+            pages = state.pages,
+            edits = state.edits,
+            currentPage = state.currentPage,
             defaultAspect = state.defaultAspect,
             settings = settings,
             chromeVisible = chromeVisible,
@@ -121,20 +138,45 @@ private fun ReaderContent(
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             ReaderBottomBar(
-                currentPage = state.currentPage,
-                pageCount = state.pageCount,
-                onJumpToPage = ::jumpTo,
+                currentPage = state.position,
+                pageCount = state.pages.size,
+                onJumpToPage = { position -> state.pages.getOrNull(position)?.let(::jumpTo) },
             )
         }
+
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding())
     }
 
     if (showSettings) {
         ReaderSettingsSheet(
             settings = settings,
+            canDeletePage = state.pages.size > 1,
             onChange = viewModel::updateSettings,
+            onCropPage = {
+                showSettings = false
+                cropping = state.currentPage
+            },
+            onDeletePage = {
+                showSettings = false
+                viewModel.deleteCurrentPage()?.let { deleted ->
+                    scope.launch {
+                        val answer = snackbar.showSnackbar(
+                            message = "Page ${deleted + 1} deleted",
+                            actionLabel = "Undo",
+                            duration = SnackbarDuration.Long,
+                        )
+                        if (answer == SnackbarResult.ActionPerformed) viewModel.restorePage(deleted)
+                    }
+                }
+            },
+            onManagePages = {
+                showSettings = false
+                onManagePages()
+            },
             onDismiss = { showSettings = false },
         )
     }
+    cropping?.let { page -> CropOverlay(page, state, viewModel, onClose = { cropping = null }) }
     if (showBookmarks) {
         BookmarksSheet(
             bookmarks = bookmarks,
@@ -145,6 +187,26 @@ private fun ReaderContent(
             onDismiss = { showBookmarks = false },
         )
     }
+}
+
+@Composable
+private fun CropOverlay(
+    page: Int,
+    state: ReaderUiState,
+    viewModel: ReaderViewModel,
+    onClose: () -> Unit,
+) {
+    CropScreen(
+        page = page,
+        initial = state.edits.cropFor(page) ?: PageCrop.FULL,
+        loadAspect = viewModel::fullPageAspect,
+        loadPage = remember(viewModel) { viewModel::fullPageBitmap },
+        onApply = { crop, allPages ->
+            viewModel.applyCrop(page, crop, allPages)
+            onClose()
+        },
+        onCancel = onClose,
+    )
 }
 
 @Composable

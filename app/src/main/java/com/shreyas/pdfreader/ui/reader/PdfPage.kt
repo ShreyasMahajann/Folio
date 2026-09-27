@@ -23,7 +23,7 @@ typealias PageLoader = suspend (page: Int, widthPx: Int, maxPixels: Int) -> Bitm
 /**
  * One page. The caller sets the size through [modifier].
  *
- * A change of [widthPx] (zoom) starts a new render. The previous bitmap stays on screen until
+ * A change of [widthPx] (zoom) or of [version] (crop) starts a new render. The previous bitmap stays on screen until
  * the sharper one is ready. Leaving the screen cancels a render that has not started.
  */
 @Composable
@@ -35,10 +35,11 @@ fun PdfPage(
     loadPage: PageLoader,
     onAspectKnown: (Float) -> Unit,
     modifier: Modifier = Modifier,
+    version: Any? = null,
 ) {
     var bitmap by remember(page) { mutableStateOf<ImageBitmap?>(null) }
 
-    LaunchedEffect(page, widthPx, maxPixels) {
+    LaunchedEffect(page, widthPx, maxPixels, version) {
         if (widthPx <= 0) return@LaunchedEffect
         loadPage(page, widthPx, maxPixels)?.let { rendered ->
             bitmap = rendered.asImageBitmap()

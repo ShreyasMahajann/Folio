@@ -14,6 +14,12 @@ const val MIN_ZOOM = 1f
 const val MAX_ZOOM = 4f
 private const val DOUBLE_TAP_ZOOM = 2.5f
 
+/** A zoom below this counts as no zoom. */
+const val ZOOM_SNAP = 1.08f
+
+/** True when [scale] is so close to 1 that the reader must treat the page as not zoomed. */
+fun isAlmostUnzoomed(scale: Float): Boolean = scale < ZOOM_SNAP
+
 data class Zoom(val scale: Float = 1f, val offset: Offset = Offset.Zero)
 
 /**
@@ -92,12 +98,25 @@ class ZoomState {
         offset = Offset.Zero
     }
 
+    /**
+     * Call when a gesture or animation ends. A pinch that stops just above 1 leaves a zoom that the
+     * eye does not see. Page turns are off while zoomed, so that zoom must not stay.
+     */
+    fun settle() {
+        if (scale != 1f && isAlmostUnzoomed(scale)) reset()
+    }
+
     suspend fun toggle(centroid: Offset) {
         val target = if (isZoomed) MIN_ZOOM else DOUBLE_TAP_ZOOM
         var previous = scale
-        animate(initialValue = scale, targetValue = target) { value, _ ->
-            transform(centroid, Offset.Zero, value / previous)
-            previous = value
+        try {
+            animate(initialValue = scale, targetValue = target) { value, _ ->
+                transform(centroid, Offset.Zero, value / previous)
+                previous = value
+            }
+        } finally {
+            // Also runs when the animation is cut short.
+            settle()
         }
     }
 }

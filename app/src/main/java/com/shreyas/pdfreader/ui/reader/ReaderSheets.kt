@@ -37,7 +37,11 @@ import java.util.Date
 @Composable
 fun ReaderSettingsSheet(
     settings: ReaderSettings,
+    canDeletePage: Boolean,
     onChange: (ReaderSettings) -> Unit,
+    onCropPage: () -> Unit,
+    onDeletePage: () -> Unit,
+    onManagePages: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(
@@ -82,6 +86,14 @@ fun ReaderSettingsSheet(
 
             Toggle("Keep screen awake", settings.keepAwake) { onChange(settings.copy(keepAwake = it)) }
             Toggle("Lock orientation", settings.lockOrientation) { onChange(settings.copy(lockOrientation = it)) }
+
+            Label("This page")
+            Row(Modifier.fillMaxWidth()) {
+                TextButton(onClick = onCropPage) { Text("Crop") }
+                TextButton(onClick = onDeletePage, enabled = canDeletePage) { Text("Delete") }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onManagePages) { Text("Manage pages") }
+            }
         }
     }
 }

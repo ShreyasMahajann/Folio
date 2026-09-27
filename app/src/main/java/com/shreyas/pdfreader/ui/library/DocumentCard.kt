@@ -43,15 +43,16 @@ fun DocumentCard(
     item: LibraryItem,
     onOpen: () -> Unit,
     onRename: () -> Unit,
+    onChangeCover: () -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val document = item.document
     var menuOpen by remember { mutableStateOf(false) }
-    val cover by produceState<ImageBitmap?>(initialValue = null, item.cover) {
+    val cover by produceState<ImageBitmap?>(initialValue = null, item.cover, item.coverVersion) {
         value = withContext(Dispatchers.IO) { BitmapFactory.decodeFile(item.cover.path)?.asImageBitmap() }
     }
-    val percent = progressPercent(document.currentPage, document.pageCount)
+    val percent = progressPercent(item.pageNumber - 1, item.pageCount)
     val opened = document.lastOpenedAt != null
 
     Column(
@@ -109,6 +110,14 @@ fun DocumentCard(
                     },
                 )
                 DropdownMenuItem(
+                    text = { Text("Change cover") },
+                    enabled = item.available,
+                    onClick = {
+                        menuOpen = false
+                        onChangeCover()
+                    },
+                )
+                DropdownMenuItem(
                     text = { Text("Remove from library") },
                     onClick = {
                         menuOpen = false
@@ -128,8 +137,8 @@ fun DocumentCard(
         Text(
             text = when {
                 !item.available -> "File not available"
-                opened -> "$percent% · page ${document.currentPage + 1} of ${document.pageCount}"
-                else -> "New · ${document.pageCount} pages"
+                opened -> "$percent% · page ${item.pageNumber} of ${item.pageCount}"
+                else -> "New · ${item.pageCount} pages"
             },
             style = MaterialTheme.typography.labelSmall,
             color = if (item.available) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,

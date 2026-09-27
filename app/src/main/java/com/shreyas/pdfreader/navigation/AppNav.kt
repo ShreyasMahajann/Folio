@@ -11,8 +11,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.shreyas.pdfreader.AppContainer
+import com.shreyas.pdfreader.ui.cover.CoverScreen
+import com.shreyas.pdfreader.ui.cover.CoverViewModel
 import com.shreyas.pdfreader.ui.library.LibraryScreen
 import com.shreyas.pdfreader.ui.library.importErrorMessage
+import com.shreyas.pdfreader.ui.pages.PagesScreen
+import com.shreyas.pdfreader.ui.pages.PagesViewModel
 import com.shreyas.pdfreader.ui.reader.ReaderScreen
 import com.shreyas.pdfreader.ui.reader.ReaderViewModel
 import com.shreyas.pdfreader.ui.search.SearchScreen
@@ -22,6 +26,8 @@ import kotlinx.coroutines.flow.receiveAsFlow
 private const val LIBRARY = "library"
 private const val READER = "reader"
 private const val SEARCH = "search"
+private const val COVER = "cover"
+private const val PAGES = "pages"
 
 @Composable
 fun AppNav(container: AppContainer) {
@@ -46,6 +52,7 @@ fun AppNav(container: AppContainer) {
             LibraryScreen(
                 onOpen = { navController.openReader(it) },
                 onSearch = { navController.navigate(SEARCH) { launchSingleTop = true } },
+                onChangeCover = { navController.navigate("$COVER/$it") { launchSingleTop = true } },
             )
         }
         composable(SEARCH) {
@@ -55,8 +62,26 @@ fun AppNav(container: AppContainer) {
         composable(
             route = "$READER/{${ReaderViewModel.DOCUMENT_ID_ARG}}",
             arguments = listOf(navArgument(ReaderViewModel.DOCUMENT_ID_ARG) { type = NavType.LongType }),
+        ) { entry ->
+            ReaderScreen(
+                onBack = { navController.popBackStack(LIBRARY, inclusive = false) },
+                onManagePages = {
+                    val documentId = entry.arguments?.getLong(ReaderViewModel.DOCUMENT_ID_ARG)
+                    navController.navigate("$PAGES/$documentId") { launchSingleTop = true }
+                },
+            )
+        }
+        composable(
+            route = "$COVER/{${CoverViewModel.DOCUMENT_ID_ARG}}",
+            arguments = listOf(navArgument(CoverViewModel.DOCUMENT_ID_ARG) { type = NavType.LongType }),
         ) {
-            ReaderScreen(onBack = { navController.popBackStack(LIBRARY, inclusive = false) })
+            CoverScreen(onDone = { navController.popBackStack() })
+        }
+        composable(
+            route = "$PAGES/{${PagesViewModel.DOCUMENT_ID_ARG}}",
+            arguments = listOf(navArgument(PagesViewModel.DOCUMENT_ID_ARG) { type = NavType.LongType }),
+        ) {
+            PagesScreen(onBack = { navController.popBackStack() })
         }
     }
 }

@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Size
 import com.shreyas.pdfreader.data.PdfDownloader
 import com.shreyas.pdfreader.ui.reader.MAX_ZOOM
 import com.shreyas.pdfreader.ui.reader.Zoom
+import com.shreyas.pdfreader.ui.reader.isAlmostUnzoomed
 import com.shreyas.pdfreader.ui.reader.listScrollForZoom
 import com.shreyas.pdfreader.ui.reader.zoomAround
 import com.shreyas.pdfreader.util.progressPercent
@@ -60,6 +61,13 @@ class ReaderMathTest {
         assertEquals(1f, zoomedOut.scale, 0f)
         assertEquals(0f, zoomedOut.offset.x, 0f)
         assertEquals(0f, zoomedOut.offset.y, 0f)
+    }
+
+    @Test
+    fun zoomJustAboveOneCountsAsNoZoom() {
+        assertEquals(true, isAlmostUnzoomed(1.016f))
+        assertEquals(true, isAlmostUnzoomed(1f))
+        assertEquals(false, isAlmostUnzoomed(1.2f))
     }
 
     @Test

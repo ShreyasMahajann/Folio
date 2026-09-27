@@ -20,6 +20,34 @@ data class DocumentEntity(
     val lastOpenedAt: Long? = null,
 )
 
+/**
+ * What the reader changed about one page. The PDF file is never changed.
+ * Page -1 holds the crop for all pages of the book.
+ */
+@Entity(
+    tableName = "page_edits",
+    primaryKeys = ["documentId", "page"],
+    foreignKeys = [
+        ForeignKey(
+            entity = DocumentEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["documentId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+)
+data class PageEditEntity(
+    val documentId: Long,
+    /** Zero-based page of the file, or -1 for all pages. */
+    val page: Int,
+    val hidden: Boolean = false,
+    /** Fractions 0..1 of the page. All four are null when the page has no crop. */
+    val cropLeft: Float? = null,
+    val cropTop: Float? = null,
+    val cropRight: Float? = null,
+    val cropBottom: Float? = null,
+)
+
 @Entity(
     tableName = "bookmarks",
     foreignKeys = [

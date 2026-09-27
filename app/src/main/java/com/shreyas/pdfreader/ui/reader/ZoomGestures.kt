@@ -53,5 +53,6 @@ suspend fun PointerInputScope.detectReaderZoom(zoom: ZoomState, paged: Boolean) 
                 }
             }
         } while (event.changes.any { it.pressed })
+        zoom.settle()
     }
 }

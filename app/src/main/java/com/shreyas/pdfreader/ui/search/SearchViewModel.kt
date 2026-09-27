@@ -14,15 +14,17 @@ import com.shreyas.pdfreader.data.LibraryRepository
 import com.shreyas.pdfreader.data.NotAPdfException
 import com.shreyas.pdfreader.data.PdfDownloader
 import com.shreyas.pdfreader.data.PdfLink
-import com.shreyas.pdfreader.pdf.PageBitmapCache
-import com.shreyas.pdfreader.pdf.PdfDocumentRenderer
+import com.shreyas.pdfreader.data.SettingsStore
+import com.shreyas.pdfreader.pdf.PageSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -56,8 +58,13 @@ sealed interface SearchEvent {
 class SearchViewModel(
     private val context: Context,
     private val repository: LibraryRepository,
+    private val settings: SettingsStore,
     private val downloader: PdfDownloader,
 ) : ViewModel() {
+
+    /** Past searches, newest first. */
+    val history: StateFlow<List<String>> =
+        settings.searchHistory.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _state = MutableStateFlow(SearchUiState())
     val state: StateFlow<SearchUiState> = _state.asStateFlow()
@@ -67,8 +74,15 @@ class SearchViewModel(
 
     private var download: Job? = null
     private var file: File? = null
-    private var renderer: PdfDocumentRenderer? = null
-    private val cache = PageBitmapCache(PREVIEW_CACHE_BYTES)
+    private var pages: PageSource? = null
+
+    fun recordSearch(query: String) {
+        viewModelScope.launch { settings.addSearch(query) }
+    }
+
+    fun clearHistory() {
+        viewModelScope.launch { settings.clearSearchHistory() }
+    }
 
     fun openPreview(link: PdfLink) {
         val current = _state.value
@@ -78,8 +92,8 @@ class SearchViewModel(
             try {
                 val downloaded = downloader.download(link) { progress -> _state.update { it.copy(progress = progress) } }
                 file = downloaded
-                val opened = PdfDocumentRenderer.open(context, Uri.fromFile(downloaded))
-                renderer = opened
+                val opened = PageSource.open(context, Uri.fromFile(downloaded))
+                pages = opened
                 if (opened.pageCount == 0) throw NotAPdfException()
                 _state.value = SearchUiState(
                     preview = PdfPreview(
@@ -108,17 +122,8 @@ class SearchViewModel(
     }
 
     /** Returns null when the page cannot be rendered. */
-    suspend fun pageBitmap(page: Int, widthPx: Int, maxPixels: Int): Bitmap? {
-        cache.get(page, widthPx)?.let { return it }
-        val open = renderer ?: return null
-        return try {
-            open.render(page, widthPx, maxPixels).also { cache.put(page, widthPx, it) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            null
-        }
-    }
+    suspend fun pageBitmap(page: Int, widthPx: Int, maxPixels: Int): Bitmap? =
+        pages?.bitmap(page, widthPx, maxPixels)
 
     fun addToLibrary() {
         val downloaded = file ?: return
@@ -139,11 +144,10 @@ class SearchViewModel(
 
     /** Closes the preview and deletes the downloaded file. */
     fun discard() {
-        renderer?.close()
-        renderer = null
+        pages?.close()
+        pages = null
         file?.delete()
         file = null
-        cache.clear()
         _state.value = SearchUiState()
     }
 
@@ -155,12 +159,10 @@ class SearchViewModel(
     override fun onCleared() = discard()
 
     companion object {
-        private const val PREVIEW_CACHE_BYTES = 48 * 1024 * 1024
-
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = this[APPLICATION_KEY] as ReaderApp
-                SearchViewModel(app, app.container.repository, PdfDownloader(app))
+                SearchViewModel(app, app.container.repository, app.container.settings, PdfDownloader(app))
             }
         }
     }
