@@ -58,7 +58,9 @@ jobs:
       - name: Build signed APK
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          ./gradlew assembleRelease -PversionName="$VERSION" -PversionCode="$GITHUB_RUN_NUMBER"
+          # Android installs an update only when the version code is higher than the installed one.
+          # The offset keeps releases above the codes of local test builds (below 1000).
+          ./gradlew assembleRelease -PversionName="$VERSION" -PversionCode="$((GITHUB_RUN_NUMBER + 1000))"
           mv app/build/outputs/apk/release/app-release.apk "folio-$VERSION.apk"
       - uses: softprops/action-gh-release@v2
         with:
