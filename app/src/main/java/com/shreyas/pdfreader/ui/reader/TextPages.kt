@@ -1,11 +1,20 @@
 package com.shreyas.pdfreader.ui.reader
 
 import android.content.ClipData
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitHorizontalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,17 +26,20 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -50,6 +62,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -60,14 +73,22 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.round
+import androidx.compose.ui.unit.roundToIntRect
 import androidx.compose.ui.unit.sp
 import com.shreyas.pdfreader.data.Dictionary
 import com.shreyas.pdfreader.data.Meaning
+import com.shreyas.pdfreader.data.ReaderFont
 import com.shreyas.pdfreader.data.ReaderSettings
 import com.shreyas.pdfreader.data.db.HighlightEntity
+import com.shreyas.pdfreader.data.db.NoteEntity
 import com.shreyas.pdfreader.data.lookupWord
 import com.shreyas.pdfreader.pdf.HighlightColor
 import com.shreyas.pdfreader.pdf.OcrScript
@@ -81,7 +102,9 @@ import kotlin.math.min
 
 private const val ORIGINAL_MAX_PIXELS = 8_000_000
 private const val MARK_ALPHA = 0.45f
-private const val LINE_HEIGHT = 1.5f
+
+/** Definitions on the card. The full list is behind "More". */
+private const val CARD_DEFINITIONS = 2
 
 /** Shown at full strength in lists, and with [MARK_ALPHA] behind text so the text stays readable in every theme. */
 val HighlightColor.color: Color
@@ -95,12 +118,20 @@ val HighlightColor.color: Color
 /** Selected text of [page]: characters [start] until [end] of the page text. */
 private data class TextSelection(val page: Int, val start: Int, val end: Int, val text: String)
 
-/** A note in the editor. It belongs to [highlight], or makes a new highlight of [selection]. */
-private class NoteDraft(val highlight: HighlightEntity?, val selection: TextSelection?)
+/** What the menu is about: selected text, or a highlight. */
+private data class MenuTarget(val selected: TextSelection?, val picked: HighlightEntity?)
+
+/** A word in the dictionary. [meanings] is null when the dictionary cannot be reached. */
+private class Lookup(val word: String) {
+    var loading by mutableStateOf(true)
+    var meanings by mutableStateOf<List<Meaning>?>(null)
+}
 
 /**
  * The pages of a book as recognized text that flows to the width of the screen.
  * Page numbers work as in [PdfPages]. A page without text shows as the original page.
+ *
+ * With [highlighter] on, a sideways drag over text makes a highlight and a drag up or down moves the text.
  */
 // ponytail: text mode always turns pages, also when the reading mode is Scroll.
 // Add a LazyColumn of page texts if continuous scroll is wanted in text mode.
@@ -113,30 +144,51 @@ fun TextPages(
     settings: ReaderSettings,
     script: OcrScript,
     highlights: List<HighlightEntity>,
+    notes: List<NoteEntity>,
     chromeVisible: Boolean,
+    highlighter: Boolean,
     jumps: Flow<Int>,
     loadText: suspend (page: Int) -> String?,
     loadPage: PageLoader,
     onPageChanged: (Int) -> Unit,
     onToggleChrome: () -> Unit,
-    onAddHighlight: (page: Int, position: Int, text: String, color: HighlightColor, note: String?) -> Unit,
+    onAddHighlight: (page: Int, position: Int, text: String, color: HighlightColor) -> Unit,
     onUpdateHighlight: (HighlightEntity) -> Unit,
     onDeleteHighlight: (HighlightEntity) -> Unit,
+    onNote: (NoteDraft) -> Unit,
+    onHighlighterColor: (HighlightColor) -> Unit,
+    onExitHighlighter: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val shownPages by rememberUpdatedState(pages)
     val current by rememberUpdatedState(currentPage)
     val pageChanged by rememberUpdatedState(onPageChanged)
+    val marking by rememberUpdatedState(highlighter)
+    val markColor by rememberUpdatedState(settings.highlighter)
     val pagerState = rememberPagerState(initialPage = positionOf(pages, currentPage)) { shownPages.size }
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
     val haptics = LocalHapticFeedback.current
 
     var selection by remember { mutableStateOf<TextSelection?>(null) }
+    // True while the finger that selects is down. The menu waits, so it does not jump during the drag.
+    var selecting by remember { mutableStateOf(false) }
     var pickedId by remember { mutableStateOf<Long?>(null) }
     val picked = highlights.firstOrNull { it.id == pickedId }
-    var lookup by remember { mutableStateOf<String?>(null) }
-    var noteDraft by remember { mutableStateOf<NoteDraft?>(null) }
+    var lookup by remember { mutableStateOf<Lookup?>(null) }
+    var fullMeaning by remember { mutableStateOf(false) }
+    // Bounds of the selection or the picked highlight, in the coordinates of the root.
+    var anchor by remember { mutableStateOf<IntRect?>(null) }
+    var origin by remember { mutableStateOf(IntOffset.Zero) }
+    val notedIds = remember(notes) { notes.mapNotNull { it.highlightId }.toSet() }
+
+    fun clear() {
+        selection = null
+        pickedId = null
+        lookup = null
+        fullMeaning = false
+        anchor = null
+    }
 
     LaunchedEffect(pagerState, pages) {
         pagerState.scrollToPage(positionOf(pages, current))
@@ -144,19 +196,24 @@ fun TextPages(
             pages.getOrNull(position)?.let { pageChanged(it) }
         }
     }
-    LaunchedEffect(pagerState.currentPage) {
-        selection = null
-        pickedId = null
-    }
+    LaunchedEffect(pagerState.currentPage, highlighter) { clear() }
+    // The selection of the highlighter stays until its highlight is on the page: no flash between the two.
+    LaunchedEffect(highlights) { if (marking) selection = null }
     LaunchedEffect(jumps) { jumps.collect { pagerState.scrollToPage(positionOf(shownPages, it)) } }
+    LaunchedEffect(lookup) {
+        lookup?.let {
+            it.meanings = Dictionary.define(it.word)
+            it.loading = false
+        }
+    }
+    BackHandler(enabled = highlighter, onBack = onExitHighlighter)
 
     val onTap by rememberUpdatedState { x: Float, width: Int ->
         val position = pagerState.currentPage
         when {
-            selection != null || pickedId != null -> {
-                selection = null
-                pickedId = null
-            }
+            // The card closes first. The selection stays for a second action.
+            lookup != null -> lookup = null
+            selection != null || pickedId != null -> clear()
             chromeVisible -> onToggleChrome()
             x < width * 0.25f && position > 0 -> {
                 scope.launch { pagerState.animateScrollToPage(position - 1) }
@@ -170,17 +227,36 @@ fun TextPages(
         }
     }
     val onSelect by rememberUpdatedState { selected: TextSelection ->
-        if (selection == null) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        if (selection == null) {
+            if (!marking) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            anchor = null
+        }
         // The bars of the reader would cover the actions for the selection.
         if (chromeVisible) onToggleChrome()
         pickedId = null
+        lookup = null
+        selecting = true
         selection = selected
     }
+    val onSelectEnd by rememberUpdatedState { finished: Boolean ->
+        selecting = false
+        val selected = selection
+        if (marking && selected != null) {
+            if (finished) {
+                haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onAddHighlight(selected.page, selected.start, selected.text, markColor)
+            } else {
+                selection = null
+            }
+        }
+    }
 
-    Box(modifier.fillMaxSize()) {
+    Box(modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInRoot().round() }) {
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 1,
+            // A sideways drag belongs to the highlighter. The edges of the screen still turn the page on a tap.
+            userScrollEnabled = !highlighter,
             key = { pages.getOrElse(it) { -1 } },
             modifier = Modifier.fillMaxSize(),
         ) { position ->
@@ -193,69 +269,87 @@ fun TextPages(
                 aspect = if (crop == null) defaultAspect else defaultAspect * crop.width / crop.height,
                 settings = settings,
                 highlights = remember(highlights, page) { highlights.filter { it.page == page } },
+                notedIds = notedIds,
                 selection = selection?.takeIf { it.page == page },
+                pickedId = pickedId,
+                marking = highlighter,
                 loadText = loadText,
                 loadPage = loadPage,
                 onTap = { x, width -> onTap(x, width) },
                 onSelect = { onSelect(it) },
+                onSelectEnd = { onSelectEnd(it) },
                 onPick = {
-                    selection = null
+                    clear()
                     pickedId = it.id
                 },
+                onAnchor = { anchor = it },
             )
         }
 
         val selected = selection
-        if (selected != null || picked != null) {
+        val menu = MenuTarget(selected.takeIf { !selecting && !highlighter }, picked)
+            .takeIf { (it.selected != null || it.picked != null) && lookup == null }
+        val place = anchor?.translate(-origin)
+        AnchoredPopIn(menu, place) { target ->
             MarkBar(
-                selectedColor = picked?.let { HighlightColor.of(it.color) },
-                note = picked?.note,
+                selectedColor = target.picked?.let { HighlightColor.of(it.color) },
+                note = target.picked?.let { mark -> notes.firstOrNull { it.highlightId == mark.id }?.text },
                 onColor = { color ->
-                    if (picked != null) {
-                        onUpdateHighlight(picked.copy(color = color.name))
-                    } else if (selected != null) {
-                        onAddHighlight(selected.page, selected.start, selected.text, color, null)
-                        selection = null
+                    if (target.picked != null) {
+                        onUpdateHighlight(target.picked.copy(color = color.name))
+                    } else if (target.selected != null) {
+                        onAddHighlight(target.selected.page, target.selected.start, target.selected.text, color)
+                        clear()
                     }
                 },
-                onNote = { noteDraft = NoteDraft(picked, selected) },
+                onNote = {
+                    val draft = if (target.picked != null) {
+                        NoteDraft(target.picked.page, target.picked.position, target.picked.text, target.picked.id)
+                    } else {
+                        target.selected?.let { NoteDraft(it.page, it.start, it.text) }
+                    }
+                    clear()
+                    draft?.let(onNote)
+                },
                 // One word only: the dictionary has no sentences.
-                onMeaning = selected?.let { lookupWord(it.text) }
+                onMeaning = target.selected?.let { lookupWord(it.text) }
                     ?.takeIf { word -> word.isNotEmpty() && word.none { it.isWhitespace() } }
-                    ?.let { word -> { lookup = word } },
-                onCopy = selected?.let {
+                    ?.let { word -> { lookup = Lookup(word) } },
+                onCopy = target.selected?.let {
                     {
                         scope.launch { clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Text", it.text))) }
-                        selection = null
+                        clear()
                     }
                 },
-                onDelete = picked?.let {
+                onDelete = target.picked?.let {
                     {
                         onDeleteHighlight(it)
-                        pickedId = null
+                        clear()
                     }
                 },
-                modifier = Modifier.align(Alignment.BottomCenter),
             )
+        }
+        AnchoredPopIn(lookup.takeIf { !fullMeaning }, place) { found ->
+            MeaningCard(found, onMore = { fullMeaning = true })
+        }
+
+        AnimatedVisibility(
+            visible = highlighter,
+            enter = popIn(),
+            exit = popOut(),
+            modifier = Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(16.dp),
+        ) {
+            HighlighterPill(settings.highlighter, onHighlighterColor, onExitHighlighter)
         }
     }
 
-    lookup?.let { word -> MeaningSheet(word, onDismiss = { lookup = null }) }
-    noteDraft?.let { draft ->
-        NoteDialog(
-            initial = draft.highlight?.note.orEmpty(),
-            onSave = { note ->
-                val highlight = draft.highlight
-                val marked = draft.selection
-                if (highlight != null) {
-                    onUpdateHighlight(highlight.copy(note = note))
-                } else if (marked != null) {
-                    onAddHighlight(marked.page, marked.start, marked.text, HighlightColor.YELLOW, note)
-                    selection = null
-                }
-                noteDraft = null
+    lookup?.takeIf { fullMeaning }?.let { found ->
+        MeaningSheet(
+            lookup = found,
+            onDismiss = {
+                lookup = null
+                fullMeaning = false
             },
-            onDismiss = { noteDraft = null },
         )
     }
 }
@@ -269,12 +363,20 @@ private fun TextPage(
     aspect: Float,
     settings: ReaderSettings,
     highlights: List<HighlightEntity>,
+    /** Highlights that have a note. */
+    notedIds: Set<Long>,
     selection: TextSelection?,
+    pickedId: Long?,
+    marking: Boolean,
     loadText: suspend (page: Int) -> String?,
     loadPage: PageLoader,
     onTap: (x: Float, width: Int) -> Unit,
     onSelect: (TextSelection) -> Unit,
+    /** The finger left the screen. False when the gesture was cancelled. */
+    onSelectEnd: (finished: Boolean) -> Unit,
     onPick: (HighlightEntity) -> Unit,
+    /** Bounds of the selection or the picked highlight, in the coordinates of the root. */
+    onAnchor: (IntRect) -> Unit,
 ) {
     var text by remember(page, script, version) { mutableStateOf<String?>(null) }
     var loaded by remember(page, script, version) { mutableStateOf(false) }
@@ -288,15 +390,22 @@ private fun TextPage(
     val marks = remember(pageText, highlights) {
         highlights.mapNotNull { mark -> findHighlight(pageText, mark.text, mark.position)?.let { mark to it } }
     }
+    val range = remember(selection, pickedId, marks) {
+        selection?.let { TextRange(it.start, it.end) }
+            ?: marks.firstOrNull { it.first.id == pickedId }?.let { TextRange(it.second.first, it.second.second) }
+    }
 
     var slot by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var slotSize by remember { mutableStateOf(IntSize.Zero) }
     var textBox by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val textOrigin = remember { mutableStateOf(Offset.Zero) }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val currentMarks by rememberUpdatedState(marks)
+    val currentMarking by rememberUpdatedState(marking)
     val tap by rememberUpdatedState(onTap)
     val pick by rememberUpdatedState(onPick)
     val select by rememberUpdatedState(onSelect)
+    val selectEnd by rememberUpdatedState(onSelectEnd)
 
     Box(
         contentAlignment = Alignment.Center,
@@ -324,15 +433,20 @@ private fun TextPage(
             !loaded -> CircularProgressIndicator()
             pageText.isBlank() -> OriginalPage(page, slotSize.width, aspect, version, settings, loadPage)
             else -> {
-                val selectionColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-                val shown = remember(pageText, marks, selection, selectionColor) {
+                // The highlighter draws in its own color: the text looks the same before and after the release.
+                val selectionColor = if (marking) {
+                    settings.highlighter.color.copy(alpha = MARK_ALPHA)
+                } else {
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                }
+                val shown = remember(pageText, marks, notedIds, selection, selectionColor) {
                     buildAnnotatedString {
                         append(pageText)
                         marks.forEach { (mark, place) ->
                             val style = SpanStyle(
                                 background = HighlightColor.of(mark.color).color.copy(alpha = MARK_ALPHA),
                                 // The line tells that the highlight has a note.
-                                textDecoration = TextDecoration.Underline.takeIf { mark.note != null },
+                                textDecoration = TextDecoration.Underline.takeIf { mark.id in notedIds },
                             )
                             addStyle(style, place.first, place.second)
                         }
@@ -341,47 +455,91 @@ private fun TextPage(
                         }
                     }
                 }
+                // ponytail: the page text is laid out again on each frame of these animations, about 220 ms.
+                // Change to a crossfade of the page if a long page stutters.
+                val textSize by animateFloatAsState(settings.textSize, Motion.standard(), label = "textSize")
+                val spacing by animateFloatAsState(settings.spacing.factor, Motion.standard(), label = "spacing")
+                val margin by animateDpAsState(settings.margins.dp.dp, Motion.standard(), label = "margin")
                 Column(
                     Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
                         .safeDrawingPadding()
-                        .padding(horizontal = 20.dp, vertical = 24.dp),
+                        .padding(horizontal = margin, vertical = 24.dp),
                 ) {
                     Text(
                         text = shown,
                         color = MaterialTheme.colorScheme.onBackground,
-                        fontFamily = FontFamily.Serif,
-                        fontSize = settings.textSize.sp,
-                        lineHeight = (settings.textSize * LINE_HEIGHT).sp,
+                        fontFamily = if (settings.font == ReaderFont.SERIF) FontFamily.Serif else FontFamily.SansSerif,
+                        fontSize = textSize.sp,
+                        lineHeight = (textSize * spacing).sp,
+                        textAlign = if (settings.justify) TextAlign.Justify else TextAlign.Start,
                         onTextLayout = { layout = it },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .onGloballyPositioned { textBox = it }
+                            .onGloballyPositioned {
+                                textBox = it
+                                textOrigin.value = it.positionInRoot()
+                            }
                             .pointerInput(page, pageText) {
-                                fun selectWords(words: TextRange) {
-                                    val picked = pageText.substring(words.start, words.end)
-                                    select(TextSelection(page, words.start, words.end, picked))
+                                // Highlighter: a drag that starts sideways marks the words. A drag that starts
+                                // up or down is not taken, so it moves the text.
+                                awaitEachGesture {
+                                    val down = awaitFirstDown(requireUnconsumed = false)
+                                    if (!currentMarking) return@awaitEachGesture
+                                    val first = layout?.wordAt(down.position) ?: return@awaitEachGesture
+                                    val start = awaitHorizontalTouchSlopOrCancellation(down.id) { change, _ ->
+                                        change.consume()
+                                    } ?: return@awaitEachGesture
+                                    select(selectionOf(page, pageText, first, layout?.wordAt(start.position)))
+                                    val finished = drag(start.id) { change ->
+                                        layout?.wordAt(change.position)?.let { word ->
+                                            select(selectionOf(page, pageText, first, word))
+                                        }
+                                        change.consume()
+                                    }
+                                    selectEnd(finished)
                                 }
+                            }
+                            .pointerInput(page, pageText) {
                                 // The word under the long press. A drag selects from this word to the word under the finger.
                                 var anchor: TextRange? = null
                                 detectDragGesturesAfterLongPress(
                                     onDragStart = { position ->
-                                        anchor = layout?.wordAt(position)?.also(::selectWords)
+                                        anchor = layout?.wordAt(position)
+                                        anchor?.let { select(selectionOf(page, pageText, it, null)) }
                                     },
+                                    onDragEnd = { if (anchor != null) selectEnd(true) },
+                                    onDragCancel = { if (anchor != null) selectEnd(!currentMarking) },
                                     onDrag = { change, _ ->
                                         val first = anchor
                                         val word = layout?.wordAt(change.position)
-                                        if (first != null && word != null) {
-                                            selectWords(TextRange(min(first.start, word.start), max(first.end, word.end)))
-                                        }
+                                        if (first != null && word != null) select(selectionOf(page, pageText, first, word))
                                     },
                                 )
                             },
                     )
                 }
+                AnchorReport(range, layout, textOrigin::value, onAnchor)
             }
         }
+    }
+}
+
+/** The text from the word [first] to the word [last], in both directions. */
+private fun selectionOf(page: Int, pageText: String, first: TextRange, last: TextRange?): TextSelection {
+    val start = min(first.start, last?.start ?: first.start)
+    val end = max(first.end, last?.end ?: first.end)
+    return TextSelection(page, start, end, pageText.substring(start, end))
+}
+
+/** Tells where [range] is on the screen, again when the text moves. Apart, so a scroll composes only this. */
+@Composable
+private fun AnchorReport(range: TextRange?, layout: TextLayoutResult?, origin: () -> Offset, onAnchor: (IntRect) -> Unit) {
+    if (range == null || layout == null || range.end > layout.layoutInput.text.length) return
+    val at = origin()
+    LaunchedEffect(range, layout, at) {
+        onAnchor(layout.getPathForRange(range.start, range.end).getBounds().translate(at).roundToIntRect())
     }
 }
 
@@ -413,6 +571,20 @@ private fun OriginalPage(
     }
 }
 
+@Composable
+private fun ColorDot(color: HighlightColor, selected: Boolean, onClick: () -> Unit) {
+    val ring = if (selected) MaterialTheme.colorScheme.onSurface else Color.Transparent
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(44.dp)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = "Highlight ${color.name.lowercase()}" },
+    ) {
+        Box(Modifier.size(26.dp).background(color.color, CircleShape).border(2.dp, ring, CircleShape))
+    }
+}
+
 /** Actions for selected text, or for a highlight when [selectedColor] is not null. A null action is not shown. */
 @Composable
 private fun MarkBar(
@@ -427,33 +599,23 @@ private fun MarkBar(
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
         shadowElevation = 6.dp,
-        modifier = modifier.navigationBarsPadding().padding(12.dp),
+        modifier = modifier.widthIn(max = 340.dp),
     ) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 2.dp)) {
             if (note != null) {
                 Text(
                     text = note,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
                 )
             }
             // Two rows: one row is wider than a small phone.
             Row(verticalAlignment = Alignment.CenterVertically) {
-                HighlightColor.entries.forEach { color ->
-                    val ring = if (color == selectedColor) MaterialTheme.colorScheme.onSurface else Color.Transparent
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clickable { onColor(color) }
-                            .semantics { contentDescription = "Highlight ${color.name.lowercase()}" },
-                    ) {
-                        Box(Modifier.size(26.dp).background(color.color, CircleShape).border(2.dp, ring, CircleShape))
-                    }
-                }
+                HighlightColor.entries.forEach { color -> ColorDot(color, color == selectedColor) { onColor(color) } }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onNote) { Text("Note") }
@@ -465,29 +627,105 @@ private fun MarkBar(
     }
 }
 
+/** Tells that the highlighter mode is on. Small, so the page stays the thing to look at. */
 @Composable
-private fun NoteDialog(initial: String, onSave: (String?) -> Unit, onDismiss: () -> Unit) {
-    var note by remember { mutableStateOf(initial) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Note") },
-        text = { OutlinedTextField(value = note, onValueChange = { note = it }, minLines = 3, maxLines = 8) },
-        confirmButton = { TextButton(onClick = { onSave(note.trim().ifEmpty { null }) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+private fun HighlighterPill(color: HighlightColor, onColor: (HighlightColor) -> Unit, onClose: () -> Unit) {
+    var choosing by remember { mutableStateOf(false) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = CircleShape,
+        shadowElevation = 6.dp,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.animateContentSize(Motion.standard()).padding(horizontal = 4.dp),
+        ) {
+            if (choosing) {
+                HighlightColor.entries.forEach { option ->
+                    ColorDot(option, option == color) {
+                        onColor(option)
+                        choosing = false
+                    }
+                }
+            } else {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clickable { choosing = true }
+                        .semantics { contentDescription = "Highlighter is on. Color ${color.name.lowercase()}. Change color" },
+                ) {
+                    Box(Modifier.size(26.dp).background(color.color, CircleShape))
+                }
+            }
+            IconButton(onClick = onClose) {
+                Icon(Icons.Default.Close, contentDescription = "Turn the highlighter off")
+            }
+        }
+    }
+}
+
+/** The meaning of a word next to the word. Short: the full list is in [MeaningSheet]. */
+@Composable
+private fun MeaningCard(lookup: Lookup, onMore: () -> Unit) {
+    val found = lookup.meanings
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(16.dp),
+        shadowElevation = 6.dp,
+        modifier = Modifier.widthIn(max = 320.dp),
+    ) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)) {
+            Text(lookup.word, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Serif)
+            val first = found?.firstOrNull()
+            when {
+                lookup.loading -> CircularProgressIndicator(
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.padding(vertical = 12.dp).size(20.dp),
+                )
+                found == null -> CardMessage("No internet connection. The dictionary is online.")
+                first == null -> CardMessage("No meaning found.")
+                else -> {
+                    if (first.partOfSpeech.isNotEmpty()) {
+                        Text(
+                            text = first.partOfSpeech.lowercase(),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(bottom = 4.dp),
+                        )
+                    }
+                    first.definitions.take(CARD_DEFINITIONS).forEachIndexed { index, definition ->
+                        Text(
+                            text = if (first.definitions.size > 1) "${index + 1}. $definition" else definition,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+            if (found != null && first != null && (found.size > 1 || first.definitions.size > CARD_DEFINITIONS)) {
+                TextButton(onClick = onMore, modifier = Modifier.align(Alignment.End)) { Text("More") }
+            } else {
+                Box(Modifier.size(8.dp))
+            }
+        }
+    }
 }
 
 @Composable
-private fun MeaningSheet(word: String, onDismiss: () -> Unit) {
-    var loading by remember(word) { mutableStateOf(true) }
-    // Null when the dictionary cannot be reached.
-    var meanings by remember(word) { mutableStateOf<List<Meaning>?>(null) }
-    LaunchedEffect(word) {
-        meanings = Dictionary.define(word)
-        loading = false
-    }
-    val found = meanings
+private fun CardMessage(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(vertical = 4.dp),
+    )
+}
 
+/** All meanings of a word. Opens from "More" on the [MeaningCard], with the answer that the card has. */
+@Composable
+private fun MeaningSheet(lookup: Lookup, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier
@@ -496,21 +734,16 @@ private fun MeaningSheet(word: String, onDismiss: () -> Unit) {
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 32.dp),
         ) {
-            Text(word, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Serif)
-            when {
-                loading -> CircularProgressIndicator(Modifier.padding(top = 16.dp).size(24.dp))
-                found == null -> Message("No internet connection. The dictionary is online.")
-                found.isEmpty() -> Message("No meaning found.")
-                else -> found.forEach { meaning ->
-                    Text(
-                        text = listOf(meaning.language, meaning.partOfSpeech).filter { it.isNotEmpty() }.joinToString(", "),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
-                    )
-                    meaning.definitions.forEachIndexed { index, definition ->
-                        Text("${index + 1}. $definition", style = MaterialTheme.typography.bodyLarge)
-                    }
+            Text(lookup.word, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Serif)
+            lookup.meanings.orEmpty().forEach { meaning ->
+                Text(
+                    text = listOf(meaning.language, meaning.partOfSpeech).filter { it.isNotEmpty() }.joinToString(", "),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 16.dp, bottom = 4.dp),
+                )
+                meaning.definitions.forEachIndexed { index, definition ->
+                    Text("${index + 1}. $definition", style = MaterialTheme.typography.bodyLarge)
                 }
             }
             Text(
@@ -521,16 +754,6 @@ private fun MeaningSheet(word: String, onDismiss: () -> Unit) {
             )
         }
     }
-}
-
-@Composable
-private fun Message(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.bodyLarge,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 16.dp),
-    )
 }
 
 /** The character under [position], or null when the position is not on a character. */

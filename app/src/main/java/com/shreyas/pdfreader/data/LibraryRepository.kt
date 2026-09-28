@@ -9,6 +9,7 @@ import com.shreyas.pdfreader.data.db.AppDatabase
 import com.shreyas.pdfreader.data.db.BookmarkEntity
 import com.shreyas.pdfreader.data.db.DocumentEntity
 import com.shreyas.pdfreader.data.db.HighlightEntity
+import com.shreyas.pdfreader.data.db.NoteEntity
 import com.shreyas.pdfreader.data.db.PageTextEntity
 import androidx.room.withTransaction
 import com.shreyas.pdfreader.pdf.ALL_PAGES
@@ -50,6 +51,7 @@ class LibraryRepository(
     private val pageEdits = database.pageEditDao()
     private val pageTexts = database.pageTextDao()
     private val highlights = database.highlightDao()
+    private val notes = database.noteDao()
     private val resolver get() = context.contentResolver
     private val copiesDir = File(context.filesDir, "documents")
     private val coversDir = File(context.filesDir, "covers")
@@ -210,6 +212,18 @@ class LibraryRepository(
     suspend fun updateHighlight(highlight: HighlightEntity) = highlights.update(highlight)
 
     suspend fun deleteHighlight(id: Long) = highlights.delete(id)
+
+    fun observeNotes(documentId: Long): Flow<List<NoteEntity>> = notes.observe(documentId)
+
+    /** Stores [note]. With [highlight], the highlight is stored first and the note belongs to it. */
+    suspend fun addNote(note: NoteEntity, highlight: HighlightEntity? = null) = database.withTransaction {
+        val highlightId = if (highlight != null) highlights.insert(highlight) else note.highlightId
+        notes.insert(note.copy(highlightId = highlightId))
+    }
+
+    suspend fun updateNote(note: NoteEntity) = notes.update(note)
+
+    suspend fun deleteNote(id: Long) = notes.delete(id)
 
     /** Named after the URI, so the cover can be written before the document has an id. */
     private fun coverFile(uri: String): File {

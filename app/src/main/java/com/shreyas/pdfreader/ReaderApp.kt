@@ -24,7 +24,7 @@ class AppContainer(context: Context) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val database = Room.databaseBuilder(context, AppDatabase::class.java, "library.db")
-        .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+        .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
         .build()
 
     val covers = CoverWriter(context)

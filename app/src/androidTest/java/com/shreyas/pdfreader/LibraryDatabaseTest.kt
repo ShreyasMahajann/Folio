@@ -7,6 +7,7 @@ import com.shreyas.pdfreader.data.db.AppDatabase
 import com.shreyas.pdfreader.data.db.BookmarkEntity
 import com.shreyas.pdfreader.data.db.DocumentEntity
 import com.shreyas.pdfreader.data.db.HighlightEntity
+import com.shreyas.pdfreader.data.db.NoteEntity
 import com.shreyas.pdfreader.data.db.PageTextEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -94,14 +95,36 @@ class LibraryDatabaseTest {
 
         val mark = HighlightEntity(documentId = id, page = 3, position = 0, text = "other", color = "YELLOW", createdAt = 1)
         val markId = highlights.insert(mark)
-        highlights.update(mark.copy(id = markId, color = "PINK", note = "a note"))
-        val stored = highlights.observe(id).first().single()
-        assertEquals("PINK", stored.color)
-        assertEquals("a note", stored.note)
+        highlights.update(mark.copy(id = markId, color = "PINK"))
+        assertEquals("PINK", highlights.observe(id).first().single().color)
 
         documents.delete(id)
         assertNull(texts.get(id, 3, "LATIN"))
         assertEquals(emptyList<HighlightEntity>(), highlights.observe(id).first())
+    }
+
+    @Test
+    fun noteBelongsToAPageAndOutlivesItsHighlight() = runTest {
+        val highlights = database.highlightDao()
+        val notes = database.noteDao()
+        val id = documents.insert(document("doc", addedAt = 1))
+
+        notes.insert(NoteEntity(documentId = id, page = 5, text = "about the page", createdAt = 1))
+        val markId = highlights.insert(
+            HighlightEntity(documentId = id, page = 2, position = 4, text = "word", color = "YELLOW", createdAt = 2),
+        )
+        notes.insert(
+            NoteEntity(documentId = id, page = 2, position = 4, quote = "word", highlightId = markId, text = "about the word", createdAt = 3),
+        )
+        assertEquals(listOf("about the word", "about the page"), notes.observe(id).first().map { it.text })
+
+        highlights.delete(markId)
+        val kept = notes.observe(id).first().first()
+        assertNull(kept.highlightId)
+        assertEquals("word", kept.quote)
+
+        documents.delete(id)
+        assertEquals(emptyList<NoteEntity>(), notes.observe(id).first())
     }
 
     @Test

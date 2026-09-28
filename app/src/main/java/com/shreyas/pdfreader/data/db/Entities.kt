@@ -68,7 +68,42 @@ data class HighlightEntity(
     val text: String,
     /** Name of a HighlightColor. */
     val color: String,
-    val note: String? = null,
+    val createdAt: Long,
+)
+
+/**
+ * A note of the reader. It belongs to a page. A note that was made on selected text or on a highlight
+ * also has the place and the text, so the reader sees what the note is about.
+ */
+@Entity(
+    tableName = "notes",
+    foreignKeys = [
+        ForeignKey(
+            entity = DocumentEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["documentId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+        // The note stays when its highlight is deleted. It keeps the quote.
+        ForeignKey(
+            entity = HighlightEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["highlightId"],
+            onDelete = ForeignKey.SET_NULL,
+        ),
+    ],
+    indices = [Index(value = ["documentId"]), Index(value = ["highlightId"])],
+)
+data class NoteEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val documentId: Long,
+    /** Zero-based page of the file. */
+    val page: Int,
+    /** Where [quote] started in the text of the page. Null for a note on the page as a whole. */
+    val position: Int? = null,
+    val quote: String? = null,
+    val highlightId: Long? = null,
+    val text: String,
     val createdAt: Long,
 )
 

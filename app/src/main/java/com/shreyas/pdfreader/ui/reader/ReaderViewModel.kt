@@ -17,6 +17,7 @@ import com.shreyas.pdfreader.data.ReaderSettings
 import com.shreyas.pdfreader.data.db.BookmarkEntity
 import com.shreyas.pdfreader.data.db.DocumentEntity
 import com.shreyas.pdfreader.data.db.HighlightEntity
+import com.shreyas.pdfreader.data.db.NoteEntity
 import com.shreyas.pdfreader.pdf.HighlightColor
 import com.shreyas.pdfreader.pdf.OcrScript
 import com.shreyas.pdfreader.pdf.PageCrop
@@ -33,6 +34,17 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/**
+ * The place of a new note. Always a page. A note on selected text or on a highlight
+ * also has [position] and [quote], and [highlightId] when the highlight exists.
+ */
+data class NoteDraft(
+    val page: Int,
+    val position: Int? = null,
+    val quote: String? = null,
+    val highlightId: Long? = null,
+)
 
 data class ReaderUiState(
     val loading: Boolean = true,
@@ -75,6 +87,9 @@ class ReaderViewModel(
 
     val highlights: StateFlow<List<HighlightEntity>> =
         repository.observeHighlights(documentId).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val notes: StateFlow<List<NoteEntity>> =
+        repository.observeNotes(documentId).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private var document: DocumentEntity? = null
     private var source: PageSource? = null
@@ -173,17 +188,45 @@ class ReaderViewModel(
         container.appScope.launch { repository.setOcrScript(documentId, script.name) }
     }
 
-    fun addHighlight(page: Int, position: Int, text: String, color: HighlightColor, note: String? = null) {
-        val highlight = HighlightEntity(
+    private fun highlight(page: Int, position: Int, text: String, color: HighlightColor) = HighlightEntity(
+        documentId = documentId,
+        page = page,
+        position = position,
+        text = text,
+        color = color.name,
+        createdAt = System.currentTimeMillis(),
+    )
+
+    fun addHighlight(page: Int, position: Int, text: String, color: HighlightColor) {
+        viewModelScope.launch { repository.addHighlight(highlight(page, position, text, color)) }
+    }
+
+    /** Stores a note for the place of [draft]. */
+    fun addNote(draft: NoteDraft, text: String) {
+        val note = NoteEntity(
             documentId = documentId,
-            page = page,
-            position = position,
+            page = draft.page,
+            position = draft.position,
+            quote = draft.quote,
+            highlightId = draft.highlightId,
             text = text,
-            color = color.name,
-            note = note,
             createdAt = System.currentTimeMillis(),
         )
-        viewModelScope.launch { repository.addHighlight(highlight) }
+        // Selected text with a note becomes a highlight, so the page shows where the note is.
+        val mark = if (draft.highlightId == null && draft.position != null && draft.quote != null) {
+            highlight(draft.page, draft.position, draft.quote, HighlightColor.YELLOW)
+        } else {
+            null
+        }
+        viewModelScope.launch { repository.addNote(note, mark) }
+    }
+
+    fun updateNote(note: NoteEntity) {
+        viewModelScope.launch { repository.updateNote(note) }
+    }
+
+    fun deleteNote(note: NoteEntity) {
+        viewModelScope.launch { repository.deleteNote(note.id) }
     }
 
     fun updateHighlight(highlight: HighlightEntity) {

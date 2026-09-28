@@ -1,6 +1,5 @@
 package com.shreyas.pdfreader.ui.reader
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.shreyas.pdfreader.ui.components.ReaderIcons
@@ -40,7 +40,6 @@ fun ReaderTopBar(
     onBack: () -> Unit,
     onToggleTextMode: () -> Unit,
     onToggleBookmark: () -> Unit,
-    onSwitchTheme: () -> Unit,
     onShowBookmarks: () -> Unit,
     onShowSettings: () -> Unit,
     modifier: Modifier = Modifier,
@@ -65,11 +64,8 @@ fun ReaderTopBar(
             TextButton(onClick = onToggleTextMode) {
                 Text(if (textMode) "PDF" else "Text", style = MaterialTheme.typography.labelLarge)
             }
-            IconButton(onClick = onSwitchTheme) {
-                Icon(ReaderIcons.Theme, contentDescription = "Switch theme: light, sepia, dark")
-            }
             IconButton(onClick = onShowBookmarks) {
-                Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Bookmarks")
+                Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Bookmarks, notes and highlights")
             }
             IconButton(onClick = onToggleBookmark) {
                 Icon(
@@ -89,7 +85,11 @@ fun ReaderTopBar(
 fun ReaderBottomBar(
     currentPage: Int,
     pageCount: Int,
+    /** The highlighter works on text. Null hides the button. */
+    highlighter: Boolean?,
     onJumpToPage: (Int) -> Unit,
+    onToggleHighlighter: () -> Unit,
+    onNote: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Non-null while the thumb is dragged. The document jumps on release, not during the drag.
@@ -112,16 +112,32 @@ fun ReaderBottomBar(
                     modifier = Modifier.systemGestureExclusion(),
                 )
             }
-            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text(
                     text = "Page ${shownPage + 1} of $pageCount",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
                 )
+                // At the bottom: the thumb reaches these while the hand holds the phone.
+                if (highlighter != null) {
+                    IconButton(onClick = onToggleHighlighter) {
+                        Icon(
+                            imageVector = ReaderIcons.Highlighter,
+                            contentDescription = if (highlighter) "Turn the highlighter off" else "Turn the highlighter on",
+                            tint = if (highlighter) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+                IconButton(onClick = onNote) {
+                    Icon(ReaderIcons.Note, contentDescription = "Write a note about this page")
+                }
                 Text(
                     text = "${progressPercent(shownPage, pageCount)}%",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.End,
+                    modifier = Modifier.weight(1f),
                 )
             }
         }

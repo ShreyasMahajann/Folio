@@ -119,3 +119,18 @@ interface HighlightDao {
     @Query("DELETE FROM highlights WHERE id = :id")
     suspend fun delete(id: Long)
 }
+
+@Dao
+interface NoteDao {
+    @Query("SELECT * FROM notes WHERE documentId = :documentId ORDER BY page, COALESCE(position, -1), createdAt")
+    fun observe(documentId: Long): Flow<List<NoteEntity>>
+
+    @Insert
+    suspend fun insert(note: NoteEntity): Long
+
+    @Update
+    suspend fun update(note: NoteEntity)
+
+    @Query("DELETE FROM notes WHERE id = :id")
+    suspend fun delete(id: Long)
+}

@@ -36,6 +36,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shreyas.pdfreader.data.ReaderSettings
 import com.shreyas.pdfreader.data.db.BookmarkEntity
 import com.shreyas.pdfreader.data.db.HighlightEntity
+import com.shreyas.pdfreader.data.db.NoteEntity
 import com.shreyas.pdfreader.pdf.PageCrop
 import com.shreyas.pdfreader.pdf.positionOf
 import com.shreyas.pdfreader.ui.theme.ReaderTheme
@@ -53,6 +54,7 @@ fun ReaderScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val bookmarks by viewModel.bookmarks.collectAsStateWithLifecycle()
     val highlights by viewModel.highlights.collectAsStateWithLifecycle()
+    val notes by viewModel.notes.collectAsStateWithLifecycle()
     val loadedSettings = settings
     val error = state.error
 
@@ -69,7 +71,7 @@ fun ReaderScreen(
             CircularProgressIndicator()
         }
         else -> ReaderTheme(loadedSettings.theme) {
-            ReaderContent(state, loadedSettings, bookmarks, highlights, viewModel, onBack, onManagePages)
+            ReaderContent(state, loadedSettings, bookmarks, highlights, notes, viewModel, onBack, onManagePages)
         }
     }
 }
@@ -80,6 +82,7 @@ private fun ReaderContent(
     settings: ReaderSettings,
     bookmarks: List<BookmarkEntity>,
     highlights: List<HighlightEntity>,
+    notes: List<NoteEntity>,
     viewModel: ReaderViewModel,
     onBack: () -> Unit,
     onManagePages: () -> Unit,
@@ -87,6 +90,11 @@ private fun ReaderContent(
     var chromeVisible by rememberSaveable { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showBookmarks by remember { mutableStateOf(false) }
+    // The place of the note that is open in the notes sheet.
+    var noteDraft by remember { mutableStateOf<NoteDraft?>(null) }
+    var highlighter by rememberSaveable { mutableStateOf(false) }
+    // The highlighter works on text only.
+    if (!state.textMode) highlighter = false
     // Page number of the file that is open in the crop screen.
     var cropping by remember { mutableStateOf<Int?>(null) }
     val snackbar = remember { SnackbarHostState() }
@@ -113,7 +121,9 @@ private fun ReaderContent(
                 settings = settings,
                 script = state.ocrScript,
                 highlights = highlights,
+                notes = notes,
                 chromeVisible = chromeVisible,
+                highlighter = highlighter,
                 jumps = jumps,
                 loadText = remember(viewModel) { viewModel::pageText },
                 loadPage = loadPage,
@@ -122,6 +132,9 @@ private fun ReaderContent(
                 onAddHighlight = viewModel::addHighlight,
                 onUpdateHighlight = viewModel::updateHighlight,
                 onDeleteHighlight = viewModel::deleteHighlight,
+                onNote = { noteDraft = it },
+                onHighlighterColor = { viewModel.updateSettings(settings.copy(highlighter = it)) },
+                onExitHighlighter = { highlighter = false },
             )
         } else {
             PdfPages(
@@ -151,7 +164,6 @@ private fun ReaderContent(
                 onBack = onBack,
                 onToggleTextMode = { viewModel.setTextMode(!state.textMode) },
                 onToggleBookmark = viewModel::toggleBookmark,
-                onSwitchTheme = { viewModel.updateSettings(settings.copy(theme = settings.theme.next())) },
                 onShowBookmarks = { showBookmarks = true },
                 onShowSettings = { showSettings = true },
             )
@@ -166,7 +178,17 @@ private fun ReaderContent(
             ReaderBottomBar(
                 currentPage = state.position,
                 pageCount = state.pages.size,
+                highlighter = highlighter.takeIf { state.textMode },
                 onJumpToPage = { position -> state.pages.getOrNull(position)?.let(::jumpTo) },
+                onToggleHighlighter = {
+                    highlighter = !highlighter
+                    // The bars would cover the text that the highlighter is for.
+                    if (highlighter) chromeVisible = false
+                },
+                onNote = {
+                    chromeVisible = false
+                    noteDraft = NoteDraft(state.currentPage)
+                },
             )
         }
 
@@ -206,11 +228,22 @@ private fun ReaderContent(
             onDismiss = { showSettings = false },
         )
     }
+    noteDraft?.let { draft ->
+        NotesSheet(
+            draft = draft,
+            notes = notes,
+            onAdd = { viewModel.addNote(draft, it) },
+            onUpdate = viewModel::updateNote,
+            onDelete = viewModel::deleteNote,
+            onDismiss = { noteDraft = null },
+        )
+    }
     cropping?.let { page -> CropOverlay(page, state, viewModel, onClose = { cropping = null }) }
     if (showBookmarks) {
         BookmarksSheet(
             bookmarks = bookmarks,
             highlights = highlights,
+            notes = notes,
             onOpen = { page ->
                 showBookmarks = false
                 jumpTo(page)
