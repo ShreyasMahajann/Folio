@@ -101,6 +101,11 @@ class PdfDocumentRenderer private constructor(
             } else {
                 context.contentResolver.openFileDescriptor(uri, "r")
             } ?: throw IOException("Cannot open $uri")
+            open(descriptor)
+        }
+
+        /** Takes over [descriptor] and closes it. */
+        suspend fun open(descriptor: ParcelFileDescriptor): PdfDocumentRenderer = withContext(Dispatchers.IO) {
             try {
                 PdfDocumentRenderer(descriptor, PdfRenderer(descriptor))
             } catch (e: Exception) {

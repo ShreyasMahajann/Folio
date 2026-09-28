@@ -35,7 +35,7 @@ Update notice in the library:
 | Area | What works in v1 |
 |---|---|
 | Import | Android file picker, "Open with", Share Sheet |
-| Web search | Searches the web for `filetype:pdf <name>` with Google or DuckDuckGo. A tapped PDF opens as a preview. It enters the library only after "Add to library". Keeps the last 20 searches, with **Clear history** |
+| Web search | Searches Google and DuckDuckGo for `filetype:pdf <name>` and shows each file one time. Each result is a card with the first page, the page count and the size. More results load at the end of the list. A tapped card opens as a preview. It enters the library only after "Add to library". Keeps the last 20 searches, with **Clear history** |
 | Library | Cover grid, progress, last-opened order, rename, remove |
 | Covers | Long press a book, then **Change cover**: a page of the PDF, a photo from the phone, or an image from the web (long-press an image, or paste its link) |
 | Delete pages | Removes pages from the reader's view, with Undo. **Manage pages** deletes and restores many pages |
@@ -165,9 +165,16 @@ app/src/main/java/com/shreyas/pdfreader/
 - **Word meaning sends the selected word to Wiktionary**, and nothing else.
 - **The update check reads one public GitHub address**, at most once per day. It sends no data about
   the phone or the library.
-- **Web search shows the search engine in a WebView.** The app does not read or scrape the results.
-  It only catches a tap on a PDF link. The page gets no access to files or to app code.
-  A downloaded file stays in the cache until the user adds it. A discarded file is deleted.
+- **Web search reads the result pages of the search engines.** The engines give results only to a
+  browser, so a WebView that is not on the screen loads each page. The page gets no access to files
+  or to app code. When one engine fails, the results of the other engine show.
+- **A result card reads only parts of the file.** A PDF has its table of contents at the end, so the
+  start of the file is not enough. The app asks the server for the parts that the first page needs
+  (HTTP `Range`), through `StorageManager.openProxyFileDescriptor`. In the test that was 0.2 MB to
+  1.6 MB of files of 1 MB to 11 MB. The whole file downloads only after a tap on the card.
+  A server that cannot give parts gives the whole file, up to 25 MB.
+- **Files of previews stay in the cache**, at most 300 MB, until the next search or until the search
+  screen closes.
 
 ### Memory
 
@@ -196,7 +203,9 @@ app/src/main/java/com/shreyas/pdfreader/
 - **Text mode always turns pages**, also when the reading mode is Scroll.
 - **Selection and highlights work only in text mode.** The original pages have no selection, search or links.
 - **Meanings are in English** and need an internet connection.
-- **Google can ask for a CAPTCHA** in the web search. Solve it once, or switch to DuckDuckGo.
+- **Google can ask for a CAPTCHA** in the web search. The results then come from DuckDuckGo only.
+- **Web search uses mobile data** for the first page of each result, about 0.5 MB each. The search engines can change
+  their pages, and the search then finds nothing until the app is updated.
 - **Web search finds only PDFs that are public on the web.** Sites that need a login do not work.
   You are responsible for the right to download a file.
 

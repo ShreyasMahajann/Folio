@@ -112,7 +112,7 @@ fun PdfPreviewScreen(
     }
 }
 
-private fun formatSize(bytes: Long): String = when {
+internal fun formatSize(bytes: Long): String = when {
     bytes >= 1_000_000 -> "%.1f MB".format(bytes / 1_000_000.0)
     else -> "${(bytes / 1000).coerceAtLeast(1)} kB"
 }
