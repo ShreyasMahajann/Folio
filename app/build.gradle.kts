@@ -82,7 +82,16 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.core)
 
+    // Text recognition with the models inside the APK, so text mode works offline.
+    implementation(libs.mlkit.text.latin)
+    implementation(libs.mlkit.text.devanagari)
+    implementation(libs.mlkit.text.chinese)
+    implementation(libs.mlkit.text.japanese)
+    implementation(libs.mlkit.text.korean)
+
     testImplementation(libs.junit)
+    // Unit tests run without Android, where org.json is only a stub.
+    testImplementation(libs.json)
 
     androidTestImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.ext.junit)

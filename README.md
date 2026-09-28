@@ -50,9 +50,11 @@ Update notice in the library:
 | Bookmarks | Toggle per page, bookmark list with jump |
 | Themes | Light, sepia, dark. One-tap switch in the top bar. Starts dark when the phone is in dark mode |
 | Comfort | Brightness (reader only), keep screen awake, orientation lock |
+| Text mode | **Text** in the top bar reads the page with text recognition and shows it as text that fits the screen. Text size from 12 to 40. **PDF** in the top bar goes back to the original page. Each book remembers its mode. Works offline. Languages: Latin script, Hindi and Marathi, Chinese, Japanese, Korean |
+| Word meaning | In text mode, long press a word, then **Meaning**. The meaning comes from Wiktionary and needs an internet connection |
+| Highlights | In text mode, long press a word and drag to select more. Four colours, a note per highlight, **Copy**. Tap a highlight to change or delete it. The bookmark list also shows the highlights |
 
-Not in v1: highlights, annotations, text search, table of contents, thumbnails, reading statistics,
-password-protected PDFs.
+Not in the app: text search, table of contents, thumbnails, reading statistics, password-protected PDFs.
 
 ## Build and run
 
@@ -116,10 +118,11 @@ app/src/main/java/com/shreyas/pdfreader/
   MainActivity.kt         Hosts Compose, receives "Open with" and Share intents
   navigation/AppNav.kt    library -> reader/{documentId}, library -> search
   data/
-    db/                   Room: documents, bookmarks
+    db/                   Room: documents, bookmarks, page edits, page text, highlights
     LibraryRepository.kt  Import, remove, rename, progress, bookmarks, covers, page edits
     CoverWriter.kt        Loads images for covers, stores covers
     UpdateChecker.kt      Reads the newest release from GitHub
+    Dictionary.kt         Word meanings from Wiktionary
     SettingsStore.kt      DataStore: reader settings
     PdfDownloader.kt      Downloads a PDF from the web into the cache
   pdf/
@@ -127,6 +130,7 @@ app/src/main/java/com/shreyas/pdfreader/
     PageBitmapCache.kt      LRU cache bounded by bytes
     PageSource.kt           One open PDF with its cache, shared by all screens
     PageEdits.kt            Deleted pages and crops, crop box maths
+    PageOcr.kt              Text recognition with ML Kit, text assembly, highlight places
   ui/
     library/              Library screen, card, ViewModel
     reader/               Reader screen, pages, zoom, bars, sheets, ViewModel
@@ -153,6 +157,12 @@ app/src/main/java/com/shreyas/pdfreader/
   files from the file picker are read-only for the app. Folio stores the edits in its database and
   applies them when it draws a page. Every edit can be undone. A cropped area is rendered at full
   sharpness, not enlarged from a picture of the whole page.
+- **Text mode uses ML Kit text recognition with the models inside the APK.** No Google Play services
+  and no network are needed, and no page leaves the phone. The cost is a larger APK. The text of a
+  page is recognized once and stored in the database. The PDF file is not changed.
+- **A highlight stores its text, not only its place.** When a page is recognized again after a crop,
+  the highlight is found again by its text.
+- **Word meaning sends the selected word to Wiktionary**, and nothing else.
 - **The update check reads one public GitHub address**, at most once per day. It sends no data about
   the phone or the library.
 - **Web search shows the search engine in a WebView.** The app does not read or scrape the results.
@@ -180,15 +190,20 @@ app/src/main/java/com/shreyas/pdfreader/
   whole file. A book that is removed from the library loses its page edits.
 - **Updates are not installed by the app.** The notice opens the release page. Download and install
   the APK from there.
-- No text layer: no selection, search inside a PDF, highlights, or links.
+- **Text mode is only as good as the text recognition.** Small or unclear print gives wrong letters.
+  Pages with columns or tables can come out in the wrong order. Pictures do not show in text mode.
+  A page without text shows as the original page. Use **PDF** in the top bar when the text is wrong.
+- **Text mode always turns pages**, also when the reading mode is Scroll.
+- **Selection and highlights work only in text mode.** The original pages have no selection, search or links.
+- **Meanings are in English** and need an internet connection.
 - **Google can ask for a CAPTCHA** in the web search. Solve it once, or switch to DuckDuckGo.
 - **Web search finds only PDFs that are public on the web.** Sites that need a login do not work.
   You are responsible for the right to download a file.
 
 ## Future improvements
 
-1. Text search, selection and highlights with the Android 15 `PdfRenderer` text APIs
-   (`PdfRendererPreV` on Android 12 to 14).
+1. Text search and exact text for PDFs with a text layer, with the Android 15 `PdfRenderer` text APIs
+   (`PdfRendererPreV` on Android 12 to 14). Text recognition is then needed only for scanned pages.
 2. Table of contents with `io.legere:pdfiumandroid` (Apache-2.0).
 3. Tile rendering for sharp zoom at any level.
 4. Thumbnail strip in the scrubber.
@@ -197,10 +212,14 @@ app/src/main/java/com/shreyas/pdfreader/
 ## Test status
 
 - Unit tests: progress, zoom maths, download file names, version comparison, search history,
-  page mapping, crop box maths.
+  page mapping, crop box maths, text assembly, highlight places, dictionary answers.
 - Instrumented tests: database queries. They need a phone or emulator.
 - Manual test on a Samsung Galaxy A35, Android 16, release build: import, 600-page and 914-page PDFs,
   page turn, scroll mode, zoom, scrubber, bookmarks, themes, position after force stop, web search,
   preview, add and discard.
+- Text mode, manual test on the same phone, release build installed over v1.1.0: text recognition in
+  English and Hindi, page without text, text size, word meaning, highlights, notes, highlight list,
+  switch between text and PDF, state after restart of the app.
 
-APK size: about 3 MB for the release build, about 32 MB for the debug build.
+APK size: about 50 MB for the release build, about 82 MB for the debug build. The text recognition
+models for five scripts and four processor types are most of it.

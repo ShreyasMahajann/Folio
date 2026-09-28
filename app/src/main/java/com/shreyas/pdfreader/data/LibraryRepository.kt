@@ -8,6 +8,8 @@ import android.provider.OpenableColumns
 import com.shreyas.pdfreader.data.db.AppDatabase
 import com.shreyas.pdfreader.data.db.BookmarkEntity
 import com.shreyas.pdfreader.data.db.DocumentEntity
+import com.shreyas.pdfreader.data.db.HighlightEntity
+import com.shreyas.pdfreader.data.db.PageTextEntity
 import androidx.room.withTransaction
 import com.shreyas.pdfreader.pdf.ALL_PAGES
 import com.shreyas.pdfreader.pdf.PageCrop
@@ -46,6 +48,8 @@ class LibraryRepository(
     private val documents = database.documentDao()
     private val bookmarks = database.bookmarkDao()
     private val pageEdits = database.pageEditDao()
+    private val pageTexts = database.pageTextDao()
+    private val highlights = database.highlightDao()
     private val resolver get() = context.contentResolver
     private val copiesDir = File(context.filesDir, "documents")
     private val coversDir = File(context.filesDir, "covers")
@@ -173,6 +177,8 @@ class LibraryRepository(
         pageEdits.ensureRow(documentId, page)
         pageEdits.setCrop(documentId, page, crop?.left, crop?.top, crop?.right, crop?.bottom)
         pageEdits.prune(documentId)
+        // Text is recognized from the cropped page.
+        pageTexts.clearPage(documentId, page)
     }
 
     /** Sets one crop for all pages and removes the crops of single pages. [crop] null removes every crop. */
@@ -183,7 +189,27 @@ class LibraryRepository(
             pageEdits.setCrop(documentId, ALL_PAGES, crop.left, crop.top, crop.right, crop.bottom)
         }
         pageEdits.prune(documentId)
+        pageTexts.clear(documentId)
     }
+
+    suspend fun setTextMode(documentId: Long, on: Boolean) = documents.setTextMode(documentId, on)
+
+    suspend fun setOcrScript(documentId: Long, script: String) = documents.setOcrScript(documentId, script)
+
+    /** Recognized text of a page, or null when the page was not recognized yet. */
+    suspend fun pageText(documentId: Long, page: Int, script: String): String? =
+        pageTexts.get(documentId, page, script)
+
+    suspend fun savePageText(documentId: Long, page: Int, script: String, text: String) =
+        pageTexts.save(PageTextEntity(documentId, page, script, text))
+
+    fun observeHighlights(documentId: Long): Flow<List<HighlightEntity>> = highlights.observe(documentId)
+
+    suspend fun addHighlight(highlight: HighlightEntity) = highlights.insert(highlight)
+
+    suspend fun updateHighlight(highlight: HighlightEntity) = highlights.update(highlight)
+
+    suspend fun deleteHighlight(id: Long) = highlights.delete(id)
 
     /** Named after the URI, so the cover can be written before the document has an id. */
     private fun coverFile(uri: String): File {

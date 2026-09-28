@@ -15,11 +15,20 @@ class PageSource private constructor(
 
     suspend fun aspectRatio(page: Int): Float = renderer.aspectRatio(page)
 
-    /** Returns null when the page cannot be rendered. */
-    suspend fun bitmap(page: Int, widthPx: Int, maxPixels: Int, crop: PageCrop? = null): Bitmap? {
-        cache.get(page, widthPx, crop)?.let { return it }
+    /**
+     * Returns null when the page cannot be rendered.
+     * [cached] false is for a large bitmap that is used once, such as the input of text recognition.
+     */
+    suspend fun bitmap(
+        page: Int,
+        widthPx: Int,
+        maxPixels: Int,
+        crop: PageCrop? = null,
+        cached: Boolean = true,
+    ): Bitmap? {
+        if (cached) cache.get(page, widthPx, crop)?.let { return it }
         return try {
-            renderer.render(page, widthPx, maxPixels, crop).also { cache.put(page, widthPx, crop, it) }
+            renderer.render(page, widthPx, maxPixels, crop).also { if (cached) cache.put(page, widthPx, crop, it) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

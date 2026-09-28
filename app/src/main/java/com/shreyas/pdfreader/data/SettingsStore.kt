@@ -29,7 +29,15 @@ data class ReaderSettings(
     val lockOrientation: Boolean = false,
     /** 0..1, or null to follow the system brightness. */
     val brightness: Float? = null,
-)
+    /** Font size of text mode, in sp. */
+    val textSize: Float = DEFAULT_TEXT_SIZE,
+) {
+    companion object {
+        const val DEFAULT_TEXT_SIZE = 18f
+        const val TEXT_SIZE_STEP = 2f
+        val TEXT_SIZES = 12f..40f
+    }
+}
 
 data class UpdateState(
     /** Time of the last successful check, in milliseconds. 0 when never checked. */
@@ -51,6 +59,7 @@ class SettingsStore(private val context: Context) {
             keepAwake = prefs[KEEP_AWAKE] ?: true,
             lockOrientation = prefs[LOCK_ORIENTATION] ?: false,
             brightness = prefs[BRIGHTNESS],
+            textSize = prefs[TEXT_SIZE] ?: ReaderSettings.DEFAULT_TEXT_SIZE,
         )
     }
 
@@ -62,6 +71,7 @@ class SettingsStore(private val context: Context) {
             prefs[KEEP_AWAKE] = settings.keepAwake
             prefs[LOCK_ORIENTATION] = settings.lockOrientation
             if (settings.brightness == null) prefs.remove(BRIGHTNESS) else prefs[BRIGHTNESS] = settings.brightness
+            prefs[TEXT_SIZE] = settings.textSize
         }
     }
 
@@ -119,6 +129,7 @@ class SettingsStore(private val context: Context) {
         val KEEP_AWAKE = booleanPreferencesKey("keep_awake")
         val LOCK_ORIENTATION = booleanPreferencesKey("lock_orientation")
         val BRIGHTNESS = floatPreferencesKey("brightness")
+        val TEXT_SIZE = floatPreferencesKey("text_size")
         val SEARCH_HISTORY = stringPreferencesKey("search_history")
         val LAST_UPDATE_CHECK = longPreferencesKey("last_update_check")
         val LATEST_VERSION = stringPreferencesKey("latest_version")

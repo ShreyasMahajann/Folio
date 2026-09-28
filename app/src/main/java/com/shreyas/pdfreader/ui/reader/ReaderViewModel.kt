@@ -16,8 +16,12 @@ import com.shreyas.pdfreader.ReaderApp
 import com.shreyas.pdfreader.data.ReaderSettings
 import com.shreyas.pdfreader.data.db.BookmarkEntity
 import com.shreyas.pdfreader.data.db.DocumentEntity
+import com.shreyas.pdfreader.data.db.HighlightEntity
+import com.shreyas.pdfreader.pdf.HighlightColor
+import com.shreyas.pdfreader.pdf.OcrScript
 import com.shreyas.pdfreader.pdf.PageCrop
 import com.shreyas.pdfreader.pdf.PageEdits
+import com.shreyas.pdfreader.pdf.PageOcr
 import com.shreyas.pdfreader.pdf.PageSource
 import com.shreyas.pdfreader.pdf.positionOf
 import kotlinx.coroutines.CancellationException
@@ -41,6 +45,9 @@ data class ReaderUiState(
     val edits: PageEdits = PageEdits(),
     /** Shape of an uncropped page, used until the real shape of a page is known. */
     val defaultAspect: Float = 0.707f,
+    /** True when the reader shows recognized text in place of the pages. */
+    val textMode: Boolean = false,
+    val ocrScript: OcrScript = OcrScript.LATIN,
 ) {
     /** Position of the current page among the shown pages. */
     val position: Int get() = positionOf(pages, currentPage)
@@ -66,8 +73,12 @@ class ReaderViewModel(
     val bookmarks: StateFlow<List<BookmarkEntity>> =
         repository.observeBookmarks(documentId).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
+    val highlights: StateFlow<List<HighlightEntity>> =
+        repository.observeHighlights(documentId).stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
     private var document: DocumentEntity? = null
     private var source: PageSource? = null
+    private var ocr: PageOcr? = null
 
     /** A page that Undo brings back. The reader opens it when the page list has it again. */
     private var restoredPage: Int? = null
@@ -94,6 +105,8 @@ class ReaderViewModel(
                 currentPage = pages[positionOf(pages, stored.currentPage)],
                 edits = edits,
                 defaultAspect = opened.aspectRatio(0),
+                textMode = stored.textMode,
+                ocrScript = OcrScript.of(stored.ocrScript),
             )
             // Edits also change in the page manager while the reader is open behind it.
             repository.observePageEdits(documentId).collect { changed ->
@@ -123,6 +136,63 @@ class ReaderViewModel(
         source?.bitmap(page, widthPx, maxPixels)
 
     suspend fun fullPageAspect(page: Int): Float? = runCatching { source?.aspectRatio(page) }.getOrNull()
+
+    /**
+     * The recognized text of [page] as the reader shows it, with its crop. Empty when the page has no text.
+     * Returns null when the page cannot be read. Each page is recognized once, then the text comes from storage.
+     */
+    suspend fun pageText(page: Int): String? {
+        val script = _state.value.ocrScript
+        repository.pageText(documentId, page, script.name)?.let { return it }
+        val crop = _state.value.edits.cropFor(page)
+        val bitmap = source?.bitmap(page, OCR_WIDTH_PX, OCR_MAX_PIXELS, crop, cached = false) ?: return null
+        val text = try {
+            recognizer(script).recognize(bitmap)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return null
+        }
+        // The crop changed during the recognition: the text is of the old crop. The page asks again.
+        if (crop == _state.value.edits.cropFor(page)) repository.savePageText(documentId, page, script.name, text)
+        return text
+    }
+
+    private fun recognizer(script: OcrScript): PageOcr {
+        ocr?.let { if (it.script == script) return it else it.close() }
+        return PageOcr(script).also { ocr = it }
+    }
+
+    fun setTextMode(on: Boolean) {
+        _state.update { it.copy(textMode = on) }
+        container.appScope.launch { repository.setTextMode(documentId, on) }
+    }
+
+    fun setOcrScript(script: OcrScript) {
+        _state.update { it.copy(ocrScript = script) }
+        container.appScope.launch { repository.setOcrScript(documentId, script.name) }
+    }
+
+    fun addHighlight(page: Int, position: Int, text: String, color: HighlightColor, note: String? = null) {
+        val highlight = HighlightEntity(
+            documentId = documentId,
+            page = page,
+            position = position,
+            text = text,
+            color = color.name,
+            note = note,
+            createdAt = System.currentTimeMillis(),
+        )
+        viewModelScope.launch { repository.addHighlight(highlight) }
+    }
+
+    fun updateHighlight(highlight: HighlightEntity) {
+        viewModelScope.launch { repository.updateHighlight(highlight) }
+    }
+
+    fun deleteHighlight(highlight: HighlightEntity) {
+        viewModelScope.launch { repository.deleteHighlight(highlight.id) }
+    }
 
     fun onPageChanged(page: Int) {
         if (page == _state.value.currentPage) return
@@ -178,10 +248,15 @@ class ReaderViewModel(
 
     override fun onCleared() {
         source?.close()
+        ocr?.close()
     }
 
     companion object {
         const val DOCUMENT_ID_ARG = "documentId"
+
+        // Wide enough for small print. A page of a book at this width has letters of about 25 pixels.
+        private const val OCR_WIDTH_PX = 1600
+        private const val OCR_MAX_PIXELS = 4_000_000
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {

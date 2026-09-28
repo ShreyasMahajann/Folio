@@ -1,12 +1,19 @@
 package com.shreyas.pdfreader.ui.reader
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.ListItem
@@ -25,20 +32,28 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.shreyas.pdfreader.data.FitMode
 import com.shreyas.pdfreader.data.PageTheme
 import com.shreyas.pdfreader.data.ReaderSettings
 import com.shreyas.pdfreader.data.ReadingMode
 import com.shreyas.pdfreader.data.db.BookmarkEntity
+import com.shreyas.pdfreader.data.db.HighlightEntity
+import com.shreyas.pdfreader.pdf.HighlightColor
+import com.shreyas.pdfreader.pdf.OcrScript
 import java.text.DateFormat
 import java.util.Date
 
 @Composable
 fun ReaderSettingsSheet(
     settings: ReaderSettings,
+    textMode: Boolean,
+    ocrScript: OcrScript,
     canDeletePage: Boolean,
     onChange: (ReaderSettings) -> Unit,
+    onTextMode: (Boolean) -> Unit,
+    onOcrScript: (OcrScript) -> Unit,
     onCropPage: () -> Unit,
     onDeletePage: () -> Unit,
     onManagePages: () -> Unit,
@@ -48,7 +63,49 @@ fun ReaderSettingsSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
     ) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 24.dp)) {
+        Column(
+            Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 24.dp),
+        ) {
+            Toggle("Text mode (reads the page as text)", textMode, onTextMode)
+            if (textMode) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text("Text size", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = { onChange(settings.copy(textSize = settings.textSize - ReaderSettings.TEXT_SIZE_STEP)) },
+                        enabled = settings.textSize > ReaderSettings.TEXT_SIZES.start,
+                    ) {
+                        Text("A\u2212", style = MaterialTheme.typography.titleMedium)
+                    }
+                    Text("${settings.textSize.toInt()}", style = MaterialTheme.typography.bodyLarge)
+                    TextButton(
+                        onClick = { onChange(settings.copy(textSize = settings.textSize + ReaderSettings.TEXT_SIZE_STEP)) },
+                        enabled = settings.textSize < ReaderSettings.TEXT_SIZES.endInclusive,
+                    ) {
+                        Text("A+", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                Label("Language of the book")
+                // Five names are wider than a small phone.
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    OcrScript.entries.forEach { script ->
+                        TextButton(onClick = { onOcrScript(script) }) {
+                            Text(
+                                text = script.label,
+                                maxLines = 1,
+                                color = if (script == ocrScript) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+
             Choice(
                 label = "Reading mode",
                 options = listOf(ReadingMode.PAGED to "Page turn", ReadingMode.SCROLL to "Scroll"),
@@ -101,7 +158,9 @@ fun ReaderSettingsSheet(
 @Composable
 fun BookmarksSheet(
     bookmarks: List<BookmarkEntity>,
+    highlights: List<HighlightEntity>,
     onOpen: (page: Int) -> Unit,
+    onOpenHighlight: (HighlightEntity) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -110,7 +169,7 @@ fun BookmarksSheet(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
         )
-        if (bookmarks.isEmpty()) {
+        if (bookmarks.isEmpty() && highlights.isEmpty()) {
             Text(
                 text = "No bookmarks yet. Tap the ribbon in the top bar to bookmark a page.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -120,12 +179,39 @@ fun BookmarksSheet(
         } else {
             val dateFormat = DateFormat.getDateInstance(DateFormat.MEDIUM)
             LazyColumn(Modifier.padding(bottom = 24.dp)) {
-                items(bookmarks, key = { it.id }) { bookmark ->
+                items(bookmarks, key = { "bookmark ${it.id}" }) { bookmark ->
                     ListItem(
                         headlineContent = { Text("Page ${bookmark.page + 1}") },
                         supportingContent = { Text(dateFormat.format(Date(bookmark.createdAt))) },
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                         modifier = Modifier.clickable { onOpen(bookmark.page) }.padding(horizontal = 8.dp),
+                    )
+                }
+                if (highlights.isNotEmpty()) {
+                    item(key = "highlights") {
+                        Text(
+                            text = "Highlights",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+                items(highlights, key = { "highlight ${it.id}" }) { highlight ->
+                    ListItem(
+                        leadingContent = {
+                            Box(
+                                Modifier
+                                    .size(16.dp)
+                                    .background(HighlightColor.of(highlight.color).color, CircleShape),
+                            )
+                        },
+                        headlineContent = { Text(highlight.text, maxLines = 2, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = {
+                            val note = highlight.note?.let { "$it\n" }.orEmpty()
+                            Text("${note}Page ${highlight.page + 1}")
+                        },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        modifier = Modifier.clickable { onOpenHighlight(highlight) }.padding(horizontal = 8.dp),
                     )
                 }
             }

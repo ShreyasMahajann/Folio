@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -28,6 +29,12 @@ interface DocumentDao {
 
     @Query("UPDATE documents SET lastOpenedAt = :time, pageCount = :pageCount WHERE id = :id")
     suspend fun markOpened(id: Long, time: Long, pageCount: Int)
+
+    @Query("UPDATE documents SET textMode = :on WHERE id = :id")
+    suspend fun setTextMode(id: Long, on: Boolean)
+
+    @Query("UPDATE documents SET ocrScript = :script WHERE id = :id")
+    suspend fun setOcrScript(id: Long, script: String)
 
     @Query("DELETE FROM documents WHERE id = :id")
     suspend fun delete(id: Long)
@@ -81,4 +88,34 @@ interface BookmarkDao {
 
     @Query("DELETE FROM bookmarks WHERE documentId = :documentId AND page = :page")
     suspend fun delete(documentId: Long, page: Int)
+}
+
+@Dao
+interface PageTextDao {
+    @Query("SELECT text FROM page_text WHERE documentId = :documentId AND page = :page AND script = :script")
+    suspend fun get(documentId: Long, page: Int, script: String): String?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun save(text: PageTextEntity)
+
+    @Query("DELETE FROM page_text WHERE documentId = :documentId AND page = :page")
+    suspend fun clearPage(documentId: Long, page: Int)
+
+    @Query("DELETE FROM page_text WHERE documentId = :documentId")
+    suspend fun clear(documentId: Long)
+}
+
+@Dao
+interface HighlightDao {
+    @Query("SELECT * FROM highlights WHERE documentId = :documentId ORDER BY page, position")
+    fun observe(documentId: Long): Flow<List<HighlightEntity>>
+
+    @Insert
+    suspend fun insert(highlight: HighlightEntity): Long
+
+    @Update
+    suspend fun update(highlight: HighlightEntity)
+
+    @Query("DELETE FROM highlights WHERE id = :id")
+    suspend fun delete(id: Long)
 }

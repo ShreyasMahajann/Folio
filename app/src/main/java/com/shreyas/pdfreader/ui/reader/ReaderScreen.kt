@@ -35,6 +35,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shreyas.pdfreader.data.ReaderSettings
 import com.shreyas.pdfreader.data.db.BookmarkEntity
+import com.shreyas.pdfreader.data.db.HighlightEntity
 import com.shreyas.pdfreader.pdf.PageCrop
 import com.shreyas.pdfreader.pdf.positionOf
 import com.shreyas.pdfreader.ui.theme.ReaderTheme
@@ -51,6 +52,7 @@ fun ReaderScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val bookmarks by viewModel.bookmarks.collectAsStateWithLifecycle()
+    val highlights by viewModel.highlights.collectAsStateWithLifecycle()
     val loadedSettings = settings
     val error = state.error
 
@@ -67,7 +69,7 @@ fun ReaderScreen(
             CircularProgressIndicator()
         }
         else -> ReaderTheme(loadedSettings.theme) {
-            ReaderContent(state, loadedSettings, bookmarks, viewModel, onBack, onManagePages)
+            ReaderContent(state, loadedSettings, bookmarks, highlights, viewModel, onBack, onManagePages)
         }
     }
 }
@@ -77,6 +79,7 @@ private fun ReaderContent(
     state: ReaderUiState,
     settings: ReaderSettings,
     bookmarks: List<BookmarkEntity>,
+    highlights: List<HighlightEntity>,
     viewModel: ReaderViewModel,
     onBack: () -> Unit,
     onManagePages: () -> Unit,
@@ -101,18 +104,39 @@ private fun ReaderContent(
     ReaderWindowEffects(settings, chromeVisible)
 
     Box(Modifier.fillMaxSize().background(settings.theme.palette.background)) {
-        PdfPages(
-            pages = state.pages,
-            edits = state.edits,
-            currentPage = state.currentPage,
-            defaultAspect = state.defaultAspect,
-            settings = settings,
-            chromeVisible = chromeVisible,
-            jumps = jumps,
-            loadPage = loadPage,
-            onPageChanged = viewModel::onPageChanged,
-            onToggleChrome = { chromeVisible = !chromeVisible },
-        )
+        if (state.textMode) {
+            TextPages(
+                pages = state.pages,
+                edits = state.edits,
+                currentPage = state.currentPage,
+                defaultAspect = state.defaultAspect,
+                settings = settings,
+                script = state.ocrScript,
+                highlights = highlights,
+                chromeVisible = chromeVisible,
+                jumps = jumps,
+                loadText = remember(viewModel) { viewModel::pageText },
+                loadPage = loadPage,
+                onPageChanged = viewModel::onPageChanged,
+                onToggleChrome = { chromeVisible = !chromeVisible },
+                onAddHighlight = viewModel::addHighlight,
+                onUpdateHighlight = viewModel::updateHighlight,
+                onDeleteHighlight = viewModel::deleteHighlight,
+            )
+        } else {
+            PdfPages(
+                pages = state.pages,
+                edits = state.edits,
+                currentPage = state.currentPage,
+                defaultAspect = state.defaultAspect,
+                settings = settings,
+                chromeVisible = chromeVisible,
+                jumps = jumps,
+                loadPage = loadPage,
+                onPageChanged = viewModel::onPageChanged,
+                onToggleChrome = { chromeVisible = !chromeVisible },
+            )
+        }
 
         AnimatedVisibility(
             visible = chromeVisible,
@@ -123,7 +147,9 @@ private fun ReaderContent(
             ReaderTopBar(
                 title = state.title,
                 bookmarked = bookmarks.any { it.page == state.currentPage },
+                textMode = state.textMode,
                 onBack = onBack,
+                onToggleTextMode = { viewModel.setTextMode(!state.textMode) },
                 onToggleBookmark = viewModel::toggleBookmark,
                 onSwitchTheme = { viewModel.updateSettings(settings.copy(theme = settings.theme.next())) },
                 onShowBookmarks = { showBookmarks = true },
@@ -150,8 +176,12 @@ private fun ReaderContent(
     if (showSettings) {
         ReaderSettingsSheet(
             settings = settings,
+            textMode = state.textMode,
+            ocrScript = state.ocrScript,
             canDeletePage = state.pages.size > 1,
             onChange = viewModel::updateSettings,
+            onTextMode = viewModel::setTextMode,
+            onOcrScript = viewModel::setOcrScript,
             onCropPage = {
                 showSettings = false
                 cropping = state.currentPage
@@ -180,9 +210,16 @@ private fun ReaderContent(
     if (showBookmarks) {
         BookmarksSheet(
             bookmarks = bookmarks,
+            highlights = highlights,
             onOpen = { page ->
                 showBookmarks = false
                 jumpTo(page)
+            },
+            onOpenHighlight = { highlight ->
+                showBookmarks = false
+                // A highlight shows only in text mode.
+                viewModel.setTextMode(true)
+                jumpTo(highlight.page)
             },
             onDismiss = { showBookmarks = false },
         )

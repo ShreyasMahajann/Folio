@@ -6,6 +6,8 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.shreyas.pdfreader.data.db.AppDatabase
 import com.shreyas.pdfreader.data.db.BookmarkEntity
 import com.shreyas.pdfreader.data.db.DocumentEntity
+import com.shreyas.pdfreader.data.db.HighlightEntity
+import com.shreyas.pdfreader.data.db.PageTextEntity
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -67,6 +69,39 @@ class LibraryDatabaseTest {
         edits.setHidden(id, 5, true)
         documents.delete(id)
         assertEquals(0, edits.observe(id).first().size)
+    }
+
+    @Test
+    fun pageTextAndHighlightsAreStoredAndLeaveWithDocument() = runTest {
+        val texts = database.pageTextDao()
+        val highlights = database.highlightDao()
+        val id = documents.insert(document("doc", addedAt = 1))
+        assertEquals(false, documents.get(id)?.textMode)
+
+        documents.setTextMode(id, true)
+        documents.setOcrScript(id, "DEVANAGARI")
+        assertEquals(true, documents.get(id)?.textMode)
+        assertEquals("DEVANAGARI", documents.get(id)?.ocrScript)
+
+        texts.save(PageTextEntity(id, page = 2, script = "LATIN", text = "old"))
+        texts.save(PageTextEntity(id, page = 2, script = "LATIN", text = "new"))
+        texts.save(PageTextEntity(id, page = 3, script = "LATIN", text = "other"))
+        assertEquals("new", texts.get(id, 2, "LATIN"))
+        assertNull(texts.get(id, 2, "KOREAN"))
+        texts.clearPage(id, 2)
+        assertNull(texts.get(id, 2, "LATIN"))
+        assertEquals("other", texts.get(id, 3, "LATIN"))
+
+        val mark = HighlightEntity(documentId = id, page = 3, position = 0, text = "other", color = "YELLOW", createdAt = 1)
+        val markId = highlights.insert(mark)
+        highlights.update(mark.copy(id = markId, color = "PINK", note = "a note"))
+        val stored = highlights.observe(id).first().single()
+        assertEquals("PINK", stored.color)
+        assertEquals("a note", stored.note)
+
+        documents.delete(id)
+        assertNull(texts.get(id, 3, "LATIN"))
+        assertEquals(emptyList<HighlightEntity>(), highlights.observe(id).first())
     }
 
     @Test

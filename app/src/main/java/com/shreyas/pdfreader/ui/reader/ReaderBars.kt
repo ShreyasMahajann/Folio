@@ -36,7 +36,9 @@ import kotlin.math.roundToInt
 fun ReaderTopBar(
     title: String,
     bookmarked: Boolean,
+    textMode: Boolean,
     onBack: () -> Unit,
+    onToggleTextMode: () -> Unit,
     onToggleBookmark: () -> Unit,
     onSwitchTheme: () -> Unit,
     onShowBookmarks: () -> Unit,
@@ -59,6 +61,10 @@ fun ReaderTopBar(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
             )
+            // Names the view that a tap opens. In text mode it is the way back to the original pages.
+            TextButton(onClick = onToggleTextMode) {
+                Text(if (textMode) "PDF" else "Text", style = MaterialTheme.typography.labelLarge)
+            }
             IconButton(onClick = onSwitchTheme) {
                 Icon(ReaderIcons.Theme, contentDescription = "Switch theme: light, sepia, dark")
             }
