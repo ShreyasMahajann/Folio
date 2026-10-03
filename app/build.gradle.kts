@@ -39,7 +39,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("release")
         }
     }
@@ -88,6 +88,9 @@ dependencies {
     implementation(libs.mlkit.text.chinese)
     implementation(libs.mlkit.text.japanese)
     implementation(libs.mlkit.text.korean)
+
+    // Writes the edited copy of a book for sharing.
+    implementation(libs.pdfbox.android)
 
     testImplementation(libs.junit)
     // Unit tests run without Android, where org.json is only a stub.

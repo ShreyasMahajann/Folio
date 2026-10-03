@@ -16,10 +16,13 @@ import com.shreyas.pdfreader.pdf.ALL_PAGES
 import com.shreyas.pdfreader.pdf.PageCrop
 import com.shreyas.pdfreader.pdf.PageEdits
 import com.shreyas.pdfreader.pdf.PdfDocumentRenderer
+import com.shreyas.pdfreader.pdf.exportEdited
 import com.shreyas.pdfreader.pdf.positionOf
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -55,6 +58,7 @@ class LibraryRepository(
     private val resolver get() = context.contentResolver
     private val copiesDir = File(context.filesDir, "documents")
     private val coversDir = File(context.filesDir, "covers")
+    private val shareDir = File(context.cacheDir, "shared")
 
     fun observeLibrary(): Flow<List<LibraryItem>> =
         combine(documents.observeAll(), pageEdits.observeHidden()) { list, hidden ->
@@ -192,6 +196,32 @@ class LibraryRepository(
         }
         pageEdits.prune(documentId)
         pageTexts.clear(documentId)
+    }
+
+    suspend fun hasEdits(documentId: Long): Boolean =
+        observePageEdits(documentId).first().let { it.hidden.isNotEmpty() || it.crops.isNotEmpty() }
+
+    /**
+     * A copy of the book for the Share Sheet, named after the title.
+     * With [edited] the copy has no deleted pages and has the crops. The next call deletes the copy.
+     *
+     * @throws IOException when the file is unreadable or cannot be written
+     */
+    suspend fun shareFile(document: DocumentEntity, edited: Boolean): File = withContext(Dispatchers.IO) {
+        shareDir.deleteRecursively()
+        shareDir.mkdirs()
+        val target = File(shareDir, document.title.replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".pdf")
+        val source = Uri.parse(document.uri)
+        val input = resolver.openInputStream(source) ?: throw IOException("Cannot read $source")
+        input.use {
+            if (edited) {
+                PDFBoxResourceLoader.init(context)
+                exportEdited(input, target, observePageEdits(document.id).first())
+            } else {
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+        }
+        target
     }
 
     suspend fun setTextMode(documentId: Long, on: Boolean) = documents.setTextMode(documentId, on)

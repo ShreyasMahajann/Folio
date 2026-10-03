@@ -44,6 +44,7 @@ fun DocumentCard(
     onOpen: () -> Unit,
     onRename: () -> Unit,
     onChangeCover: () -> Unit,
+    onShare: () -> Unit,
     onRemove: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -115,6 +116,14 @@ fun DocumentCard(
                     onClick = {
                         menuOpen = false
                         onChangeCover()
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Share") },
+                    enabled = item.available,
+                    onClick = {
+                        menuOpen = false
+                        onShare()
                     },
                 )
                 DropdownMenuItem(

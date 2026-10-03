@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.File
 
 class LibraryViewModel(container: AppContainer) : ViewModel() {
 
@@ -47,6 +48,9 @@ class LibraryViewModel(container: AppContainer) : ViewModel() {
 
     private val _messages = Channel<String>(Channel.BUFFERED)
     val messages = _messages.receiveAsFlow()
+
+    private val _shares = Channel<File>(Channel.BUFFERED)
+    val shares = _shares.receiveAsFlow()
 
     init {
         viewModelScope.launch { checkForUpdate() }
@@ -87,6 +91,24 @@ class LibraryViewModel(container: AppContainer) : ViewModel() {
 
     fun remove(document: DocumentEntity) {
         viewModelScope.launch { repository.remove(document) }
+    }
+
+    suspend fun hasEdits(document: DocumentEntity): Boolean = repository.hasEdits(document.id)
+
+    /** Makes the file for the Share Sheet and sends it to [shares]. */
+    fun share(document: DocumentEntity, edited: Boolean) {
+        viewModelScope.launch {
+            _importing.value = true
+            try {
+                _shares.send(repository.shareFile(document, edited))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _messages.send("Cannot share. The file cannot be read.")
+            } finally {
+                _importing.value = false
+            }
+        }
     }
 
     companion object {

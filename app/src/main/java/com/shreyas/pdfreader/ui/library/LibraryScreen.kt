@@ -1,7 +1,13 @@
 package com.shreyas.pdfreader.ui.library
 
+import android.content.ClipData
+import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
+import androidx.core.content.FileProvider
+import androidx.compose.runtime.rememberCoroutineScope
+import com.shreyas.pdfreader.MainActivity
+import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -64,6 +70,8 @@ fun LibraryScreen(
     val snackbar = remember { SnackbarHostState() }
     var renaming by remember { mutableStateOf<DocumentEntity?>(null) }
     var removing by remember { mutableStateOf<DocumentEntity?>(null) }
+    var sharing by remember { mutableStateOf<DocumentEntity?>(null) }
+    val scope = rememberCoroutineScope()
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) viewModel.import(uri)
@@ -71,6 +79,21 @@ fun LibraryScreen(
     val pickPdf = { picker.launch(arrayOf("application/pdf")) }
 
     LaunchedEffect(viewModel) { viewModel.messages.collect { snackbar.showSnackbar(it) } }
+    LaunchedEffect(viewModel) {
+        viewModel.shares.collect { file ->
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.share", file)
+            val send = Intent(Intent.ACTION_SEND)
+                .setType("application/pdf")
+                .putExtra(Intent.EXTRA_STREAM, uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            // The Share Sheet reads the grant and the preview from the clip data.
+            send.clipData = ClipData.newRawUri(file.name, uri)
+            // Folio accepts shared PDFs, so without this it is in its own list.
+            val chooser = Intent.createChooser(send, null)
+                .putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, arrayOf(ComponentName(context, MainActivity::class.java)))
+            context.startActivity(chooser)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -114,6 +137,15 @@ fun LibraryScreen(
                                 onOpen = { onOpen(item.document.id) },
                                 onRename = { renaming = item.document },
                                 onChangeCover = { onChangeCover(item.document.id) },
+                                onShare = {
+                                    scope.launch {
+                                        if (viewModel.hasEdits(item.document)) {
+                                            sharing = item.document
+                                        } else {
+                                            viewModel.share(item.document, edited = false)
+                                        }
+                                    }
+                                },
                                 onRemove = { removing = item.document },
                             )
                         }
@@ -148,6 +180,19 @@ fun LibraryScreen(
                 ) { Text("Remove") }
             },
             dismissButton = { TextButton(onClick = { removing = null }) { Text("Cancel") } },
+        )
+    }
+    sharing?.let { document ->
+        val share = { edited: Boolean ->
+            viewModel.share(document, edited)
+            sharing = null
+        }
+        AlertDialog(
+            onDismissRequest = { sharing = null },
+            title = { Text("Share book") },
+            text = { Text("The edited copy has your crops and does not have the pages you deleted. The original is the file as you added it.") },
+            confirmButton = { TextButton(onClick = { share(true) }) { Text("Edited copy") } },
+            dismissButton = { TextButton(onClick = { share(false) }) { Text("Original") } },
         )
     }
 }
