@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Folio"
-include(":app")
+include(":app", ":lite")

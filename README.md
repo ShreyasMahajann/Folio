@@ -56,6 +56,30 @@ Update notice in the library:
 
 Not in the app: text search, table of contents, thumbnails, reading statistics, password-protected PDFs.
 
+## Folio Lite
+
+Folio Lite is a second, small app in the `lite` module. It is for old devices that cannot install Folio:
+Folio needs Android 12, Folio Lite runs from Android 4.0.3. It gives an old tablet or phone a second life
+as a PDF reader.
+
+| | Folio (`app`) | Folio Lite (`lite`) |
+|---|---|---|
+| Android | 12 or newer | 4.0.3 or newer, 32-bit ARM |
+| APK size | About 55 MB | About 3 MB |
+| Built with | Jetpack Compose, Room, ML Kit | Platform views and pdfium. No Compose, no AndroidX |
+| Application id | `com.shreyas.pdfreader` | `com.shreyas.pdfreader.lite` |
+
+What Folio Lite does: lists the PDFs it finds in the device storage, turns the page with a tap, a swipe or
+the volume keys, remembers the page of each book, and has four zoom steps and a night mode.
+
+Not in Folio Lite: text mode, web search, bookmarks, highlights, covers, delete and crop pages, share.
+
+Both apps install side by side. A release on GitHub holds only the Folio APK. Build Folio Lite on a PC:
+
+```powershell
+.\gradlew.bat :lite:assembleRelease   # APK: lite\build\outputs\apk\release\
+```
+
 ## Build and run
 
 Requirements: Android Studio 2025.x or newer, Android SDK platform 36, a phone with Android 12 or newer.
